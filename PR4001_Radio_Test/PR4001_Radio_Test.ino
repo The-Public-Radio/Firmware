@@ -32,7 +32,7 @@ int shutdown = 11;                          //the shutdown pin for the amp, used
 int led = 13;                               //not used - for debugging only
 
 Public_Radio radio(resetPin, SDIO, SCLK);   //initializing the radio
-int channel = 971;                          //setting channel. 97.1 MHz = "971"
+int channel = 939;                          //setting channel. 97.1 MHz = "971"
 int volume = 15;                            //setting volume, 0-15. 15 works well
 
 void setup()
