@@ -4,12 +4,12 @@ Firmware & support scripts for Public Radio.
 
   This build provides low battery indication using the ADC to reverse calculate VCC. See page 134 of the datasheet, [here](http://www.atmel.com/Images/Atmel-2586-AVR-8-bit-Microcontroller-ATtiny25-ATtiny45-ATtiny85_Datasheet-Summary.pdf)  
   The low battery functionality works as follows: 
-  1.) While initializing the attiny, check VCC. 
-  2.) If VCC is below 2.1V -- roughly where the FM IC reception starts to go all static -- don't initialize the radio, mute all outputs and flash the LED to signal low battery.  
-  3.) If VCC is above 2.1V proceed with initializing the radio as normal.  
+  1. While initializing the attiny, check VCC. 
+  2. If VCC is below 2.1V -- roughly where the FM IC reception starts to go all static -- don't initialize the radio, mute all outputs and flash the LED to signal low battery.  
+  3. If VCC is above 2.1V proceed with initializing the radio as normal.  
 
 
-  Also included here is Maker.sh for ease of programming and testing these in a more light weight way than using eeprom.py
+  _Also included here is Maker.sh for ease of programming and testing in a more light weight way than using eeprom.py while in the terminal_
 
   ======================
 
