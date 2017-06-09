@@ -36,15 +36,18 @@
 unsigned char USI_TWI_Master_Transfer( unsigned char );
 unsigned char USI_TWI_Master_Stop( void );
 
+
+
 union  USI_TWI_state
 {
   unsigned char errorState;         // Can reuse the TWI_state for error states due to that it will not be need if there exists an error.
-  struct
+  struct  
   {
     unsigned char addressMode         : 1;
     unsigned char masterWriteDataMode : 1;
     unsigned char unused              : 6;
-  }; 
+  } validState;  
+  
 }   USI_TWI_state;
 
 /*---------------------------------------------------------------
@@ -94,7 +97,7 @@ unsigned char USI_TWI_Start_Transceiver_With_Data(unsigned char addr, unsigned c
                                  (0xE<<USICNT0);                                     // set USI to shift 1 bit i.e. count 2 clock edges.
 
   USI_TWI_state.errorState = 0;
-  USI_TWI_state.addressMode = TRUE;
+  USI_TWI_state.validState.addressMode = TRUE;
 
 #ifdef PARAM_VERIFICATION
   if(msg > (unsigned char*)RAMEND)                 // Test if address is outside SRAM space
@@ -129,7 +132,7 @@ unsigned char USI_TWI_Start_Transceiver_With_Data(unsigned char addr, unsigned c
 
   if ( !(addr & (1<<TWI_READ_BIT)) )                // The LSB in the address byte determines if is a masterRead or masterWrite operation.
   {
-    USI_TWI_state.masterWriteDataMode = TRUE;
+    USI_TWI_state.validState.masterWriteDataMode = TRUE;
   }
 
 /* Release SCL to ensure that (repeated) Start can be performed */
@@ -159,11 +162,11 @@ unsigned char USI_TWI_Start_Transceiver_With_Data(unsigned char addr, unsigned c
   do
   {
     /* If masterWrite cycle (or inital address tranmission)*/
-    if (USI_TWI_state.addressMode || USI_TWI_state.masterWriteDataMode)
+    if (USI_TWI_state.validState.addressMode || USI_TWI_state.validState.masterWriteDataMode)
     {
       /* Write a byte */
       PORT_USI &= ~(1<<PIN_USI_SCL);                // Pull SCL LOW.
-      if ( USI_TWI_state.addressMode ) {
+      if ( USI_TWI_state.validState.addressMode ) {
 	USIDR = addr;
 	msgSize++; /* adjust for later decrement. */
       } else {
@@ -175,13 +178,13 @@ unsigned char USI_TWI_Start_Transceiver_With_Data(unsigned char addr, unsigned c
       DDR_USI  &= ~(1<<PIN_USI_SDA);                // Enable SDA as input.
       if( USI_TWI_Master_Transfer( tempUSISR_1bit ) & (1<<TWI_NACK_BIT) ) 
       {
-        if ( USI_TWI_state.addressMode )
+        if ( USI_TWI_state.validState.addressMode )
           USI_TWI_state.errorState = USI_TWI_NO_ACK_ON_ADDRESS;
         else
           USI_TWI_state.errorState = USI_TWI_NO_ACK_ON_DATA;
         return (FALSE);
       }
-      USI_TWI_state.addressMode = FALSE;            // Only perform address transmission once.
+      USI_TWI_state.validState.addressMode = FALSE;            // Only perform address transmission once.
     }
     /* Else masterRead cycle*/
     else
