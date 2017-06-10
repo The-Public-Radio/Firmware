@@ -34,7 +34,7 @@ This code assumes default clock speed of 1MHZ.
 // Is the current Vcc higher than the programming voltage threshold?
 
 uint8_t programmingVoltagePresent() {
-    return( PROGRAM_V_TEST() );
+    return( VCC_GT(PROGRAM_V ) );
 }    
 
 
@@ -75,16 +75,7 @@ int readPbit(void) {
 
            
     if ( PROGRAM_V_TEST() ) {      // we should have risen back above threshold 5ms ago...
-        
-        PORTB |= _BV(1); 
-        _delay_ms(1);
-        PORTB &= ~_BV(1);
-        _delay_ms(1);
-        PORTB |= _BV(1); 
-        _delay_ms(1);
-        PORTB &= ~_BV(1);
-        _delay_ms(1);        
-                
+                        
         return(-2);                             // if not, then something is wrong. 
                 
     }                
@@ -93,8 +84,7 @@ int readPbit(void) {
             
     uint8_t bitflag = 0;                   // Did we get a data pulse? Is this a 1 bit?
     
-    PORTB |= _BV(1); 
-
+    
     while ( dp_countdown--  && !bitflag ) {
         
         if ( PROGRAM_V_TEST() ) {
@@ -105,7 +95,6 @@ int readPbit(void) {
                                         
     }                                    
     
-    PORTB &= ~_BV(1);
         
     if (bitflag) {
         

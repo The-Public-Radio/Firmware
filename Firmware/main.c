@@ -850,8 +850,7 @@ int main(void)
     
     
     adc_off();      /// All done with the ADC, so same a bit of power                               
-        
-        
+                
 	timer0_init();
 
 	timer1_init();

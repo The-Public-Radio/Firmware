@@ -46,7 +46,7 @@ uint16_t readADC(void);
 
 // Vcc   =  (1.1v * 1024) / ADC
 
-#define VCC2A(v) ((1.1*1023.0)/v)
+#define VCC2A(v) ((uint16_t) ((1.1*1023.0)/v))
 
 
 // This macro tests if the current Vcc is currently above the specified voltage

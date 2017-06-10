@@ -99,12 +99,7 @@ uint16_t readADC(void) {
     // Note we could have used ADLAR left adjust mode and then only needed to read a single byte here
         
     uint16_t adc = ADC;;       // 0<= result <=1023
-            
-    // Compute a fixed point with 1 decimal place (i.e. 5v= 50)
-    //
-    // Vcc10 = ((1.1v * 1024) / ADC ) * 10              ->convert to 1 decimal fixed point
-    // Vcc10 = ((11   * 1024) / ADC )               ->simplify to all 16-bit integer math
-    
+                
     return adc;
                     
 }
