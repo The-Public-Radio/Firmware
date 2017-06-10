@@ -140,6 +140,7 @@
 #include <util/delay.h>
 
 #include "USI_TWI_Master.h"
+#include "VccADC.h"
 
 typedef enum {
 	NORMAL = 1,

@@ -3,7 +3,7 @@
 #
 PART=attiny45
 
-OBJS=main.o USI_TWI_Master.o
+OBJS=main.o USI_TWI_Master.o VccADC.o
 
 OPTFLAGS=-Os
 
@@ -59,3 +59,4 @@ clobber: clean
 	rm -f pr.elf pr.lst pr.hex
 
 USI_TWI_Master.o: USI_TWI_Master.c USI_TWI_Master.h
+VccADC.o: VccADC.c VccADC.h
