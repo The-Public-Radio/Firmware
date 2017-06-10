@@ -18,8 +18,7 @@ This code assumes default clock speed of 1MHZ.
 #include <util/delay.h>
 
 #include "VccADC.h"
-
-#define VCC_GT(v) (readADC()<=VCC2A(v))      // returns true if the ADC is higher than V
+#include "VccProg.h"
 
 #define PROGRAM_V (4.5)
 
@@ -50,7 +49,7 @@ uint8_t programmingVoltagePresent() {
 
 
 
-int readPbit() {
+int readPbit(void) {
     
     uint16_t sp_countdown = PP_TIMEOUT_US / ADC_DELAY_US;      // Wait up to 20ms for a sync pulse
         

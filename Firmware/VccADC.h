@@ -32,6 +32,14 @@ void adc_on(void);
 void adc_off(void);
 
 
+// ADC clock at 1mhz with /8 prescaller is 125Khz
+// Takes ~125us 
+
+#define ADC_DELAY_US 125 
+
+uint16_t readADC(void);
+
+
 // This macro will give you the value returned from the ADC for a Vcc voltage of V
 // Nice to have in a macro because for fixed voltages, you can precompute 
 // rather than doing an expensive 16 bit multiply and divide at runtime. 
@@ -41,9 +49,7 @@ void adc_off(void);
 #define VCC2A(v) ((1.1*1023.0)/v)
 
 
-// ADC clock at 1mhz with /8 prescaller is 125Khz
-// Takes ~125us 
+// This macro tests if the current Vcc is currently above the specified voltage
 
-#define ADC_DELAY_US 125 
+#define VCC_GT(v) (readADC()<=VCC2A(v))      // returns true if the ADC is higher than V
 
-uint16_t readADC(void);

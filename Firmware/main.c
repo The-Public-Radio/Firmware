@@ -141,6 +141,9 @@
 
 #include "USI_TWI_Master.h"
 #include "VccADC.h"
+#include "VccProg.h"
+
+#define LOW_BATTERY_VOLTAGE (2.1)       // Below this, we will just blink LED and not turn on 
 
 typedef enum {
 	NORMAL = 1,
@@ -768,39 +771,94 @@ void rssi2pwm(void)
 
 int main(void)
 {
-	PORTB |= 0x08;	/* Enable pull up on PB3 */
-	DDRB |= _BV(OCR1B);
-	// DDRB |= (1 << LED_PORT);
+	PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
+    
+	DDRB |= _BV(OCR1B);     /* Set LED pin PB4 to output */
+    
+    adc_on();
+    
+    if (!VCC_GT(LOW_BATTERY_VOLTAGE)) {
+        
+        adc_off();  // Mind as well save some power 
+        
+        // indicate dead battery with a 10%, 1Hz blink
+        
+        // TODO: Probably only need to blink for a minute and then go into deep sleep?
+            
+        while (1) {
+            
+            PORTB|=_BV(LED_PORT);
+            _delay_ms(100);
+            PORTB&=~_BV(LED_PORT);
+            _delay_ms(900);
+            
+        }
+        
+    }   
+    
+    
+    if (programmingVoltagePresent()) {          
+        
+        // Ok, we are currently being powered by a programmer since a battery could not make the voltage go this high
+        
+        while (1) {
+            
+            
+            uint8_t r1;
+            
+            // Try to read in two bytes from the programmer. 
+            // This will timeout and fail if we wait longer then 40ms
+            // in which case we will start listening again for next transmit
+                        
+            r1=readPbyte();
+            
+            if (r1>=0) {
+                
+                uint8_t r2;
+                
+                r2=readPbyte();
+                    
+                if (r2>=0) {
+                    
+                    // If we got here, then we received two bytes from the programmer
+                    
+                    uint16_t channel = (r1<<8) | (r2);      // build the channel word, MSB first. 
+                       
+                    update_channel(channel);                // Update the EEPROM and recalc the CRC
+                    
+                    // Done programming! Signal to the world with a fast blink!
+                    
+                    while (1) {
 
+                        PORTB|=_BV(LED_PORT);
+                        _delay_ms(50);
+                        PORTB&=~_BV(LED_PORT);
+                        _delay_ms(50);
+                        
+                    }
+                    
+                }
+                
+            }                                                            
+            
+            
+        }
+        
+        // Never get here, there is no way out of programming mode except power cycle                    
+        
+    }     
+    
+    
+    adc_off();      /// All done with the ADC, so same a bit of power                               
+        
+        
 	timer0_init();
 
 	timer1_init();
 
 	check_eeprom();
 
-	// Read the current Vcc voltage as a 2 decimal fixed point value
-		
-	uint8_t vccx10 = readVccVoltage();
-	
-	// Convert to whole integer value (rounds down)
-	
-	uint8_t batteryV = vccx10;
-				
-	// when vcc is below 2.1V keep radio output off and flash status led
-													
-	if (batteryV <= 21) {
-		//blink led 160ms on/off
-		display_mode = FACTORY_RESET;
-		//mute audio output
-		set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
-			(eeprom_read_byte(EEPROM_VOLUME) & 0x00));
-		si4702_write_registers();		
-	}
-
-	else if(batteryV >21){
-		//initialize the radio when vcc is high enough
-		si4702_init();
-	}
+	si4702_init();
 
 	sei();
 
