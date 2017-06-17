@@ -136,14 +136,23 @@
 #include <util/crc16.h>
 
 #define	F_CPU	1000000UL
-#define LED_PORT PB4
 #include <util/delay.h>
+
+
 
 #include "USI_TWI_Master.h"
 #include "VccADC.h"
 #include "VccProg.h"
 
+
+#define LED_DRIVE_BIT       PB4
+#define FMIC_RESET_BIT      PB1
+#define BUTTON_INPUT_BIT    PB3
+
 #define LOW_BATTERY_VOLTAGE (2.1)       // Below this, we will just blink LED and not turn on 
+
+#define SBI(port,bit) (port|=_BV(bit))
+#define CLI(port,bit) (port&=~_BV(bit))
 
 typedef enum {
 	NORMAL = 1,
@@ -731,14 +740,27 @@ void rssi2pwm(void)
 	OCR1B = rssi * 4;
 }
 
+// Goto bed, will only wake up on button press interrupt (if enabled)
+
+void deepSleep(void) {    
+	set_sleep_mode( SLEEP_MODE_PWR_DOWN );
+    sleep_enable();
+    sleep_cpu();        // Good night    
+}    
+
 int main(void)
 {
-    
-    
-    
-	PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
-    
-	DDRB |= _BV(OCR1B);     /* Set LED pin PB4 to output */
+
+
+    SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, connected to FM_IC and AMP and will make them sleep
+            
+	SBI( PORTB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
+
+
+    // Flash LED briefly just to show power up
+    SBI( PORTB , LED_DRIVE_BIT);
+    _delay_ms(100);
+    CLI( PORTB , LED_DRIVE_BIT);
     
     adc_on();
     
@@ -752,12 +774,19 @@ int main(void)
             
         while (1) {
             
-            PORTB|=_BV(LED_PORT);
+            SBI( PORTB , LED_DRIVE_BIT);
             _delay_ms(100);
-            PORTB&=~_BV(LED_PORT);
+            CLI( PORTB , LED_DRIVE_BIT);
             _delay_ms(900);
             
         }
+        
+        // We are not driving any pins except the RESET to keep the FM_IC and AMP asleep
+        // and the LED which is low, so no Wasted power
+        
+        deepSleep();
+        // Never get here since button int not enabled.
+        // 
         
     }   
     
@@ -795,9 +824,9 @@ int main(void)
                     
                     while (1) {
 
-                        PORTB|=_BV(LED_PORT);
+                        PORTB|=_BV(LED_DRIVE_BIT);
                         _delay_ms(50);
-                        PORTB&=~_BV(LED_PORT);
+                        PORTB&=~_BV(LED_DRIVE_BIT);
                         _delay_ms(50);
                         
                     }
@@ -815,9 +844,10 @@ int main(void)
     
     
     adc_off();      /// All done with the ADC, so same a bit of power      
-        
-    _delay_ms(5000);                        
-                
+
+       
+	PORTB |= 0x08;	        /* Enable pull up on PB3 for Button */ 
+                        
 	timer0_init();
 
 	timer1_init();
@@ -828,24 +858,22 @@ int main(void)
 
 	sei();
     
-    _delay_ms(5000);        // Play for 5 seconds.
+    
+    // TODO: Set up the button ISR to catch presses when sleeping. 
     
     // disable the FM chip
-    
-    
+        
     //si4702_shutdown();
+                     
+    //PORTB &= ~_BV(1);       // Drive RESET low on the amp and FM chips, puts them to sleep
     
-    _delay_ms(5000);        // Play for 5 seconds.
-             
+    //DDRB = _BV(1);         // Only drive reset.
     
-    PORTB &= ~_BV(1);       // Drive RESET low on the amp and FM chips, puts them to sleep
-    
-    DDRB = _BV(1);         // Only drive reset.
+    // TODO: DO the breathing LED here for a while, driven off the timer Overflow
     
     
-	set_sleep_mode( SLEEP_MODE_PWR_DOWN );
-    sleep_enable();
-    sleep_cpu();        // Good night
+    
+    deepSleep();
         
 
 	/*
