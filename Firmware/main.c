@@ -136,10 +136,23 @@
 #include <util/crc16.h>
 
 #define	F_CPU	1000000UL
-#define LED_PORT PB4
 #include <util/delay.h>
 
+
+
 #include "USI_TWI_Master.h"
+#include "VccADC.h"
+#include "VccProg.h"
+
+
+#define LED_DRIVE_BIT       PB4
+#define FMIC_RESET_BIT      PB1
+#define BUTTON_INPUT_BIT    PB3
+
+#define LOW_BATTERY_VOLTAGE (2.1)       // Below this, we will just blink LED and not turn on 
+
+#define SBI(port,bit) (port|=_BV(bit))
+#define CLI(port,bit) (port&=~_BV(bit))
 
 typedef enum {
 	NORMAL = 1,
@@ -215,79 +228,6 @@ const uint8_t last_resort_param[16] PROGMEM = {
 
 void tune_direct(uint16_t);
 
-uint8_t readVccVoltage(void) {
-    
-    // Select ADC inputs
-    // bit    76543210 
-    // REFS = 00       = Vcc used as Vref
-    // MUX  =   100001 = Single ended, 1.1V (Internal Ref) as Vin
-    
-    // ADMUX = 0b00100001;
-    ADMUX = _BV(MUX3) | _BV(MUX2); // For ATtiny85
-
-    /*
-    By default, the successive approximation circuitry requires an input clock frequency between 50
-    kHz and 200 kHz to get maximum resolution.
-    */  
-                
-    // Enable ADC, set prescaller to /8 which will give a ADC clock of 1mHz/8 = 125kHz
-    
-    ADCSRA = _BV(ADEN) | _BV(ADPS1) | _BV(ADPS0);
-    
-    /*
-        After switching to internal voltage reference the ADC requires a settling time of 1ms before
-        measurements are stable. Conversions starting before this may not be reliable. The ADC must
-        be enabled during the settling time.
-    */
-        
-    _delay_ms(1);
-                
-    /*
-        The first conversion after switching voltage source may be inaccurate, and the user is advised to discard this result.
-    */
-    
-        
-    ADCSRA |= _BV(ADSC);                // Start a conversion
-
-
-    while( ADCSRA & _BV( ADSC) ) ;      // Wait for 1st conversion to be ready...
-                                        //..and ignore the result
-                        
-        
-    /*
-        After the conversion is complete (ADIF is high), the conversion result can be found in the ADC
-        Result Registers (ADCL, ADCH).      
-        
-        When an ADC conversion is complete, the result is found in these two registers.
-        When ADCL is read, the ADC Data Register is not updated until ADCH is read.     
-    */
-    
-    // Note we could have used ADLAR left adjust mode and then only needed to read a single byte here
-        
-    uint8_t low  = ADCL;
-    uint8_t high = ADCH;
-
-    uint16_t adc = (high << 8) | low;       // 0<= result <=1023
-            
-    // Compute a fixed point with 1 decimal place (i.e. 5v= 50)
-    //
-    // Vcc   =  (1.1v * 1024) / ADC
-    // Vcc10 = ((1.1v * 1024) / ADC ) * 10              ->convert to 1 decimal fixed point
-    // Vcc10 = ((11   * 1024) / ADC )               ->simplify to all 16-bit integer math
-                
-    uint8_t vccx10 = (uint8_t) ( (11 * 1024) / adc); 
-    
-    /*  
-        Note that the ADC will not automatically be turned off when entering other sleep modes than Idle
-        mode and ADC Noise Reduction mode. The user is advised to write zero to ADEN before entering such
-        sleep modes to avoid excessive power consumption.
-    */
-    
-    ADCSRA &= ~_BV( ADEN );         // Disable ADC to save power
-    
-    return( vccx10 );
-    
-}
 
 /*
  * Button press callout functions.
@@ -741,6 +681,41 @@ void si4702_init(void)
 	si4702_write_registers();
 }
 
+
+/*
+
+To place device in power down mode:
+
+1. (Optional) Set the AHIZEN bit high to maintain a dc bias of
+0.5 x VIO volts at the LOUT and ROUT pins while in
+powerdown, but preserve the states of the other bits in
+Register 07h. Note that in powerup the LOUT and ROUT
+pins are set to the common mode voltage specified in
+Table 8 on page 12, regardless of the state of AHIZEN.
+
+2. Set the ENABLE bit high and the DISABLE bit high to
+place the device in powerdown mode. Note that all register
+states are maintained so long as VIO is supplied and the
+RST pin is high.
+
+3. (Optional) Remove RCLK.
+
+4. Remove VA and VD supplies as needed.                                                                     
+
+We will only do #2
+
+*/
+
+
+void si4702_shutdown(void) {
+
+	si4702_read_registers();
+	set_shadow_reg(REGISTER_02, _BV(6) | _BV(0) );      // Set both ENABLE and DISABLE to enter powerdown mode
+	si4702_write_registers();    
+    
+}    
+
+
 /*
  * RSSI appears to range from zero to 75, with but in practical terms 0
  * is never seen, an empty channel reads at about 10, just due to noise
@@ -765,43 +740,141 @@ void rssi2pwm(void)
 	OCR1B = rssi * 4;
 }
 
+// Goto bed, will only wake up on button press interrupt (if enabled)
+
+void deepSleep(void) {    
+	set_sleep_mode( SLEEP_MODE_PWR_DOWN );
+    sleep_enable();
+    sleep_cpu();        // Good night    
+}    
+
 int main(void)
 {
-	PORTB |= 0x08;	/* Enable pull up on PB3 */
-	DDRB |= _BV(OCR1B);
-	// DDRB |= (1 << LED_PORT);
 
+
+    SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, connected to FM_IC and AMP and will make them sleep
+            
+	SBI( PORTB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
+
+
+    // Flash LED briefly just to show power up
+    SBI( PORTB , LED_DRIVE_BIT);
+    _delay_ms(100);
+    CLI( PORTB , LED_DRIVE_BIT);
+    
+    adc_on();
+    
+    if (!VCC_GT(LOW_BATTERY_VOLTAGE)) {
+        
+        adc_off();  // Mind as well save some power 
+        
+        // indicate dead battery with a 10%, 1Hz blink
+        
+        // TODO: Probably only need to blink for a minute and then go into deep sleep?
+            
+        while (1) {
+            
+            SBI( PORTB , LED_DRIVE_BIT);
+            _delay_ms(100);
+            CLI( PORTB , LED_DRIVE_BIT);
+            _delay_ms(900);
+            
+        }
+        
+        // We are not driving any pins except the RESET to keep the FM_IC and AMP asleep
+        // and the LED which is low, so no Wasted power
+        
+        deepSleep();
+        // Never get here since button int not enabled.
+        // 
+        
+    }   
+    
+    
+    if (programmingVoltagePresent()) {          
+        
+        // Ok, we are currently being powered by a programmer since a battery could not make the voltage go this high
+        
+        while (1) {
+            
+            
+            uint8_t r1;
+            
+            // Try to read in two bytes from the programmer. 
+            // This will timeout and fail if we wait longer then 40ms
+            // in which case we will start listening again for next transmit
+                        
+            r1=readPbyte();
+            
+            if (r1>=0) {
+                
+                uint8_t r2;
+                
+                r2=readPbyte();
+                    
+                if (r2>=0) {
+                    
+                    // If we got here, then we received two bytes from the programmer
+                    
+                    uint16_t channel = (r1<<8) | (r2);      // build the channel word, MSB first. 
+                       
+                    update_channel(channel);                // Update the EEPROM and recalc the CRC
+                    
+                    // Done programming! Signal to the world with a fast blink!
+                    
+                    while (1) {
+
+                        PORTB|=_BV(LED_DRIVE_BIT);
+                        _delay_ms(50);
+                        PORTB&=~_BV(LED_DRIVE_BIT);
+                        _delay_ms(50);
+                        
+                    }
+                    
+                }
+                
+            }                                                            
+            
+            
+        }
+        
+        // Never get here, there is no way out of programming mode except power cycle                    
+        
+    }     
+    
+    
+    adc_off();      /// All done with the ADC, so same a bit of power      
+
+       
+	PORTB |= 0x08;	        /* Enable pull up on PB3 for Button */ 
+                        
 	timer0_init();
 
 	timer1_init();
 
 	check_eeprom();
 
-	// Read the current Vcc voltage as a 2 decimal fixed point value
-		
-	uint8_t vccx10 = readVccVoltage();
-	
-	// Convert to whole integer value (rounds down)
-	
-	uint8_t batteryV = vccx10;
-				
-	// when vcc is below 2.1V keep radio output off and flash status led
-													
-	if (batteryV <= 21) {
-		//blink led 160ms on/off
-		display_mode = FACTORY_RESET;
-		//mute audio output
-		set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
-			(eeprom_read_byte(EEPROM_VOLUME) & 0x00));
-		si4702_write_registers();		
-	}
-
-	else if(batteryV >21){
-		//initialize the radio when vcc is high enough
-		si4702_init();
-	}
+	si4702_init();
 
 	sei();
+    
+    
+    // TODO: Set up the button ISR to catch presses when sleeping. 
+    
+    // disable the FM chip
+        
+    //si4702_shutdown();
+                     
+    //PORTB &= ~_BV(1);       // Drive RESET low on the amp and FM chips, puts them to sleep
+    
+    //DDRB = _BV(1);         // Only drive reset.
+    
+    // TODO: DO the breathing LED here for a while, driven off the timer Overflow
+    
+    
+    
+    deepSleep();
+        
 
 	/*
 	 * Set the sleep mode to idle when sleep_mode() is called.
@@ -810,6 +883,8 @@ int main(void)
 	 * Most importantly, Timers 0 & 1 and i2c keep going.
 	 */
 	set_sleep_mode(SLEEP_MODE_IDLE);
+    
+ 
 
 	while(1) {
 		uint16_t current_chan;
