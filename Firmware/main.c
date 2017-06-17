@@ -672,6 +672,41 @@ void si4702_init(void)
 	si4702_write_registers();
 }
 
+
+/*
+
+To place device in power down mode:
+
+1. (Optional) Set the AHIZEN bit high to maintain a dc bias of
+0.5 x VIO volts at the LOUT and ROUT pins while in
+powerdown, but preserve the states of the other bits in
+Register 07h. Note that in powerup the LOUT and ROUT
+pins are set to the common mode voltage specified in
+Table 8 on page 12, regardless of the state of AHIZEN.
+
+2. Set the ENABLE bit high and the DISABLE bit high to
+place the device in powerdown mode. Note that all register
+states are maintained so long as VIO is supplied and the
+RST pin is high.
+
+3. (Optional) Remove RCLK.
+
+4. Remove VA and VD supplies as needed.                                                                     
+
+We will only do #2
+
+*/
+
+
+void si4702_shutdown(void) {
+
+	si4702_read_registers();
+	set_shadow_reg(REGISTER_02, _BV(6) | _BV(0) );      // Set both ENABLE and DISABLE to enter powerdown mode
+	si4702_write_registers();    
+    
+}    
+
+
 /*
  * RSSI appears to range from zero to 75, with but in practical terms 0
  * is never seen, an empty channel reads at about 10, just due to noise
@@ -698,6 +733,9 @@ void rssi2pwm(void)
 
 int main(void)
 {
+    
+    
+    
 	PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
     
 	DDRB |= _BV(OCR1B);     /* Set LED pin PB4 to output */
@@ -776,8 +814,8 @@ int main(void)
     }     
     
     
-    adc_off();      /// All done with the ADC, so same a bit of power       
-    
+    adc_off();      /// All done with the ADC, so same a bit of power      
+        
     _delay_ms(5000);                        
                 
 	timer0_init();
@@ -789,6 +827,26 @@ int main(void)
 	si4702_init();
 
 	sei();
+    
+    _delay_ms(5000);        // Play for 5 seconds.
+    
+    // disable the FM chip
+    
+    
+    //si4702_shutdown();
+    
+    _delay_ms(5000);        // Play for 5 seconds.
+             
+    
+    PORTB &= ~_BV(1);       // Drive RESET low on the amp and FM chips, puts them to sleep
+    
+    DDRB = _BV(1);         // Only drive reset.
+    
+    
+	set_sleep_mode( SLEEP_MODE_PWR_DOWN );
+    sleep_enable();
+    sleep_cpu();        // Good night
+        
 
 	/*
 	 * Set the sleep mode to idle when sleep_mode() is called.
@@ -797,6 +855,8 @@ int main(void)
 	 * Most importantly, Timers 0 & 1 and i2c keep going.
 	 */
 	set_sleep_mode(SLEEP_MODE_IDLE);
+    
+ 
 
 	while(1) {
 		uint16_t current_chan;
