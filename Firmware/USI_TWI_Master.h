@@ -115,3 +115,5 @@
 void              USI_TWI_Master_Initialise( void );
  unsigned char USI_TWI_Start_Transceiver_With_Data(unsigned char, unsigned char * , unsigned char );
 unsigned char USI_TWI_Get_State_Info( void );
+
+unsigned char USI_TWI_Read_Data(unsigned char addr, unsigned char *msg, unsigned char msgSize);

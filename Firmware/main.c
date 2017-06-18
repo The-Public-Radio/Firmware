@@ -144,15 +144,19 @@
 #include "VccADC.h"
 #include "VccProg.h"
 
+#define FMIC_ADDRESS        (0b0010000)                // Hardcoded for this chip, "a seven bit device address equal to 0010000"
 
 #define LED_DRIVE_BIT       PB4
 #define FMIC_RESET_BIT      PB1
+#define FMIC_SCLK_BIT       PB2
+#define FMIC_SDIO_BIT       PB0
+
 #define BUTTON_INPUT_BIT    PB3
 
 #define LOW_BATTERY_VOLTAGE (2.1)       // Below this, we will just blink LED and not turn on 
 
 #define SBI(port,bit) (port|=_BV(bit))
-#define CLI(port,bit) (port&=~_BV(bit))
+#define CBI(port,bit) (port&=~_BV(bit))
 
 typedef enum {
 	NORMAL = 1,
@@ -740,6 +744,29 @@ void rssi2pwm(void)
 	OCR1B = rssi * 4;
 }
 
+void debug_slowblink(void) {
+    while (1) {
+            
+        SBI( PORTB , LED_DRIVE_BIT);
+        _delay_ms(100);
+        CBI( PORTB , LED_DRIVE_BIT);
+        _delay_ms(900);
+            
+    }    
+}    
+
+void debug_fastblink(void) {
+    while (1) {
+            
+        SBI( PORTB , LED_DRIVE_BIT);
+        _delay_ms(100);
+        CBI( PORTB , LED_DRIVE_BIT);
+        _delay_ms(100);
+            
+    }    
+}    
+
+
 // Goto bed, will only wake up on button press interrupt (if enabled)
 
 void deepSleep(void) {    
@@ -751,16 +778,42 @@ void deepSleep(void) {
 int main(void)
 {
 
-
-    SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, connected to FM_IC and AMP and will make them sleep
-            
+    // Set up the reset line to the FM_IC and AMP first so they are quiet. 
+    // This eliminates the need for the external pull-down on this line. 
+    
+    SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, makes them sleep            
+    
+    
+    
 	SBI( PORTB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
 
+
+    while (1) {
+
+        _delay_ms(1);
+        
+        SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
+        _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
+                                           // high) does not occur within 300 ns before the rising edge of RST.
+        
+        
+        USI_TWI_Master_Initialise();
+        _delay_ms(1);
+        USI_TWI_Read_Data( FMIC_ADDRESS  , NULL , 0);
+        
+    }        
+    
+    
+    if (!USI_TWI_Read_Data( FMIC_ADDRESS  , NULL , 0)) {
+        debug_fastblink();
+    } else {        
+        debug_slowblink();
+    }        
 
     // Flash LED briefly just to show power up
     SBI( PORTB , LED_DRIVE_BIT);
     _delay_ms(100);
-    CLI( PORTB , LED_DRIVE_BIT);
+    CBI( PORTB , LED_DRIVE_BIT);
     
     adc_on();
     
@@ -776,7 +829,7 @@ int main(void)
             
             SBI( PORTB , LED_DRIVE_BIT);
             _delay_ms(100);
-            CLI( PORTB , LED_DRIVE_BIT);
+            CBI( PORTB , LED_DRIVE_BIT);
             _delay_ms(900);
             
         }
@@ -845,6 +898,8 @@ int main(void)
     
     adc_off();      /// All done with the ADC, so same a bit of power      
 
+
+
        
 	PORTB |= 0x08;	        /* Enable pull up on PB3 for Button */ 
                         
@@ -854,7 +909,15 @@ int main(void)
 
 	check_eeprom();
 
+
+    // Enable internal pull-ups on the 2-wire interface to the FM_IC
+    // This eliminates the need for external pull-ups
+    SBI( PORTB , FMIC_SCLK_BIT);
+    SBI( PORTB , FMIC_SDIO_BIT);
+
 	si4702_init();
+    
+    // TODO: Soft fade in the volume to avoid the "click" at turnon?
 
 	sei();
     
