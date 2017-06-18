@@ -75,7 +75,7 @@ static inline uint8_t sda_read(void) {
 ---------------------------------------------------------------*/
 void USI_TWI_Master_Initialise( void )
 {
-    
+        
   sda_pull_high();
   scl_pull_high();
   
@@ -113,82 +113,116 @@ static unsigned char USI_TWI_Write_Byte( unsigned char data ) {
     }        
     
     // Here SCL is high
-    
-    
+        
     // The device acknowledges the address by driving SDIO
     // low after the next falling SCLK edge, for 1 cycle. 
-    
-    
+        
     sda_pull_high();            // Pull SDA high so we can see if the salve is driving low
+    _delay_us(BIT_TIME_US);     // Not needed, but so we can see what is happening on the scope
     scl_drive_low();
-    
-    
+        
     _delay_us(BIT_TIME_US);
     
+    uint8_t ret = sda_read();              // slave should be driving low now
+
+    // TODO: CHeck ret
     
-    if (sda_read()) {           // slave should be driving low
-        return(1);              // error
-    }    
+    scl_pull_high();                        // Clock out the ACK bit
+    _delay_us(BIT_TIME_US);
+    scl_drive_low();
+    _delay_us(BIT_TIME_US);    
     
-    return(0);        
-    
-    
+    return(ret);        
+        
 }
+
 
 // WriteFlag=0 leaves in read mode
 // WriteFlag=1 leaves in write mode
 // Returns 0 on success, 1 if no ACK bit received.
+// Assumes bus idle on entry (SCL and SDA high) 
 // Returns with SCL low
 
-static unsigned char USI_TWI_Start( unsigned char addr , unsigned char writeFlag) {
+static unsigned char USI_TWI_Start( unsigned char addr , unsigned char readFlag) {
 
     // We assume that we enter in idle state since that is how all public functions leave us
+    
+    _delay_us(BIT_TIME_US);         // Make sure we have been in idle at least long enough to see the falling SDA
 
     // Data transfer is always initiated by a Bus Master device. A high to low transition on the SDA line, while
     // SCL is high, is defined to be a START condition or a repeated start condition.
-    
+       
     sda_drive_low();
     
     _delay_us(BIT_TIME_US);
     
+    scl_drive_low();    
+            
     // A START condition is always followed by the (unique) 7-bit slave address (MSB first) and then w/r bit
         
-    uint8_t controlword = (addr << 1) | writeFlag;     
+    // The control word is latched internally on
+    // rising SCLK edges and is eight bits in length, comprised
+    // of a seven bit device address equal to 0010000b and a
+    // read/write bit (write = 0 and read = 1).        
+        
+    uint8_t controlword = (addr << 1) | readFlag;     
     
     return USI_TWI_Write_Byte( controlword );
         
 }    
 
-/*---------------------------------------------------------------
- USI Transmit and receive function. LSB of first byte in data 
- indicates if a read or write cycles is performed. If set a read
- operation is performed.
+// Write the words pointed to by data 
+// addr is the chip bus address
+// assumes bus is idle on entry, Exists with bus idle
+// Returns 0 on success
 
- Function generates (Repeated) Start Condition, sends address and
- R/W, Reads/Writes Data, and verifies/sends ACK.
- 
- Success or error code is returned. Error codes are defined in 
- USI_TWI_Master.h
----------------------------------------------------------------*/
-
-unsigned char USI_TWI_Read_Data(unsigned char addr, unsigned char *msg, unsigned char msgSize)
+unsigned char USI_TWI_Write_Data(unsigned char addr, uint8_t *data , uint8_t count)
 {
     
-    return( USI_TWI_Start( addr , 0 ));
+    USI_TWI_Start( addr , 1 );      // TODO: check for error
+    
+    while (count--) {
+        
+        USI_TWI_Write_Byte( *data );
+        
+        data++;
+        
+    }
+    
+    // Data transfer ends with the STOP condition 
+    // (rising edge of SDIO while SCLK is high). 
+    
+    // TODO: Is this Really needed? Can we just do repeat starts and save this code? Spec is vague if address is reset on start. 
+    
+    sda_drive_low();
+    scl_pull_high();
+    _delay_us(BIT_TIME_US);
+    
+    sda_pull_high();
+    _delay_us(BIT_TIME_US);
+    
+    
+    // End transaction with bus in idle
+    
+    return(0);
+    
 }
-
 
 // TODO: delete this placeholder
 
+/*
 unsigned char USI_TWI_Start_Transceiver_With_Data(unsigned char c, unsigned char *d, unsigned char l) {
     return(0);
-}    
+} 
+*/   
 
 /*---------------------------------------------------------------
  Core function for shifting data in and out from the USI.
  Data to be sent has to be placed into the USIDR prior to calling
- this function. Data read, will be return'ed from the function.
+ this function. Data read, will be returned from the function.
 ---------------------------------------------------------------*/
+
+/*
 unsigned char USI_TWI_Master_Transfer( unsigned char temp )
 {
   USISR = temp;                                     // Set USISR according to temp.
@@ -214,10 +248,15 @@ unsigned char USI_TWI_Master_Transfer( unsigned char temp )
   return temp;                             // Return the data from the USIDR
 }
 
+
+*/
+
 /*---------------------------------------------------------------
  Function for generating a TWI Stop Condition. Used to release 
  the TWI bus.
 ---------------------------------------------------------------*/
+
+/*
 unsigned char USI_TWI_Master_Stop( void )
 {
   PORT_USI &= ~(1<<PIN_USI_SDA);           // Pull SDA low.
@@ -237,3 +276,4 @@ unsigned char USI_TWI_Master_Stop( void )
 
   return (TRUE);
 }
+*/

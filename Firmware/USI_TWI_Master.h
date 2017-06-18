@@ -117,3 +117,5 @@ void              USI_TWI_Master_Initialise( void );
 unsigned char USI_TWI_Get_State_Info( void );
 
 unsigned char USI_TWI_Read_Data(unsigned char addr, unsigned char *msg, unsigned char msgSize);
+
+unsigned char USI_TWI_Write_Data(unsigned char addr, uint8_t *data , uint8_t size); 

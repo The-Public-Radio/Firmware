@@ -441,19 +441,18 @@ static inline void set_shadow_reg(si4702_register reg, uint16_t value)
 }
 
 /*
- * Read all the registers into the shadow array
- */
-void si4702_read_registers(void)
-{
-	USI_TWI_Start_Transceiver_With_Data(0x21, shadow, 32);
-}
-
-/*
  * Just write registers 2 thru 7 inclusive from the shadow array.
  */
 void si4702_write_registers(void)
 {
-	USI_TWI_Start_Transceiver_With_Data(0x20, &(shadow[REGISTER_02]), 12);
+	//USI_TWI_Start_Transceiver_With_Data(0x20, &(shadow[REGISTER_02]), 12);
+        
+    // Only registers 0x02 - 0x07 are relevant for config, and each register is 2 bytes wide
+    
+    // Even though the datasheet says that the reserved bits of 0x07 must be Read before writing, 
+    // The previous version of this software blindly wrote 0's and that seems to work fine. 
+    
+    USI_TWI_Write_Data( FMIC_ADDRESS ,  &(shadow[REGISTER_02]) , (0x07 - 0x02) * 2 );
 }
 
 /*
@@ -471,46 +470,6 @@ void tune_direct(uint16_t chan)
 	si4702_write_registers();
 }
 
-/*
- * check_stc() -	Return the state of the STC bit.
- */
-static uint16_t check_stc(void)
-{
-	si4702_read_registers();
-	
-	return get_shadow_reg(REGISTER_10) & 0x4000;
-}
-
-/*
- * seek_start() -	Start a seek operation, direction = UP, wrap
- *			at band edges. Does not wait for the seek to complete,
- *			poll for completion with check_stc().
- */
-void seek_start(void)
-{
-	set_shadow_reg(REGISTER_02, get_shadow_reg(REGISTER_02) | 0x0100);
-	si4702_write_registers();
-}
-
-void seek_stop(void)
-{
-	set_shadow_reg(REGISTER_02, get_shadow_reg(REGISTER_02) & ~0x0100);
-	si4702_write_registers();
-	while (check_stc());
-}
-
-/*
- * read_chan() -	Return the currently tuned channel (after a tune/seek)
- *			by reading READCHAN from Register 11. Only valid after
- *			a seek/tune is complete (indicated by STC set - see
- *			check_stc() above.)
- */
-static uint16_t read_chan(void)
-{
-	si4702_read_registers();
-	
-	return get_shadow_reg(REGISTER_11) & 0x03ff;
-}
 	
 /*
  * update_channel() -	Update the channel stored in the working params.
@@ -608,30 +567,67 @@ void check_eeprom(void)
 }
 
 
+// Start the FM_IC. Also happens to start the amp since they are on a common RESET line
+// Enter with FRIC_RESET low (reset active)
+// Assumes FMIC_SDIO port bit is 0 (default at startup)
+
+void fmic_start(void) {
+    
+        
+        
+        
+    USI_TWI_Master_Initialise();       // This will switch SDIO and SCLK to pull-up which is the idle state
+            
+}     
+
+
 void si4702_init(void)
 {
 	/*
 	 * Init the Si4702 as follows:
 	 *
-	 * Set PB1 (/Reset on Si7202) as output, drive low.
-	 * Set PB0 (SDIO on si4702) as output, drive low.
-	 * Set PB1 (/Reset on Si7202) as output, drive high.
-	 * Set up USI in I2C (TWI) mode, reassigns PB0 as SDA.
-	 * Read all 16 registers into shadow array.
+	 * Set up USI in I2C (TWI) mode
+     * Enable pull-ups on TWI lines
 	 * Enable the oscillator (by writing to TEST1 & other registers)
 	 * Wait for oscillator to start
 	 * Enable the IC, set the config, tune to channel, then unmute output.
 	 */
 
-	DDRB |= 0x03;
-	PORTB &= ~(0x03);
-	_delay_ms(1);
-	PORTB |= 0x02;
-	_delay_ms(1);
+
+    // Let's do the magic dance to awaken the FM_IC in 2-wire mode
+    // We enter with RESET low (active)
+        
+    // Busmode selection method 1 requires the use of the
+    // GPIO3, SEN, and SDIO pins. To use this busmode
+    // selection method, the GPIO3 and SDIO pins must be
+    // sampled low by the device on the rising edge of RST.
+    // 
+    // The user may either drive the GPIO3 pin low externally,
+    // or leave the pin floating. If the pin is not driven by the
+    // user, it will be pulled low by an internal 1 M? resistor
+    // which is active only while RST is low. The user must
+    // drive the SEN and SDIO pins externally to the proper
+    // state.
+
+
+    // Drive SDIO low (GPIO3 will be pulled low internally by the FM_IC) 
+        
+    SBI( DDRB , FMIC_SDIO_BIT );  // Assumes the PORT bit is low, which it is on powerup.
+    _delay_us(1);                 // Give it is microsecond to go low against pin capacitance. 
+        
+    SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
+        
+    _delay_us(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
+                                        // high) does not occur within 300 ns before the rising edge of RST.
+                                        
+                                        
+    // Enable the pull-ups on the TWI lines
 
 	USI_TWI_Master_Initialise();
 	
-	si4702_read_registers();
+    // Reg 0x07 bit 15 - Crystal Oscillator Enable.
+    // 0 = Disable (default).
+    // 1 = Enable.
 
 	set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | 0x8000);
 
@@ -673,7 +669,6 @@ void si4702_init(void)
 	 * It looks like the radio tunes to <something> once enabled.
 	 * Make sure the STC bit is cleared by clearing the TUNE bit.
 	 */
-	si4702_read_registers();
 	set_shadow_reg(REGISTER_03, 0x0000);
 	si4702_write_registers();
 
@@ -713,36 +708,11 @@ We will only do #2
 
 void si4702_shutdown(void) {
 
-	si4702_read_registers();
 	set_shadow_reg(REGISTER_02, _BV(6) | _BV(0) );      // Set both ENABLE and DISABLE to enter powerdown mode
 	si4702_write_registers();    
     
 }    
 
-
-/*
- * RSSI appears to range from zero to 75, with but in practical terms 0
- * is never seen, an empty channel reads at about 10, just due to noise
- * (suggests 10dBuV (~3uV) noise.)
- * Remove this bottom end, and then multiply the result by 4 to map it
- * better onto the 0-255 range of the PWM generator.
- */
-void rssi2pwm(void)
-{
-	uint8_t rssi;
-
-	si4702_read_registers();
-	
-	rssi =  get_shadow_reg(REGISTER_10) & 0x00ff;
-
-	if (rssi > 10) {
-		rssi -= 10;
-	} else {
-		rssi = 1;
-	}
-		
-	OCR1B = rssi * 4;
-}
 
 void debug_slowblink(void) {
     while (1) {
@@ -773,7 +743,10 @@ void deepSleep(void) {
 	set_sleep_mode( SLEEP_MODE_PWR_DOWN );
     sleep_enable();
     sleep_cpu();        // Good night    
-}    
+}   
+
+
+
 
 int main(void)
 {
@@ -782,35 +755,12 @@ int main(void)
     // This eliminates the need for the external pull-down on this line. 
     
     SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, makes them sleep            
-    
-    
+        
     
 	SBI( PORTB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
-
-
-    while (1) {
-
-        _delay_ms(1);
-        
-        SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
-        _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
-                                           // high) does not occur within 300 ns before the rising edge of RST.
-        
-        
-        USI_TWI_Master_Initialise();
-        _delay_ms(1);
-        USI_TWI_Read_Data( FMIC_ADDRESS  , NULL , 0);
-        
-    }        
     
     
-    if (!USI_TWI_Read_Data( FMIC_ADDRESS  , NULL , 0)) {
-        debug_fastblink();
-    } else {        
-        debug_slowblink();
-    }        
-
-    // Flash LED briefly just to show power up
+    // Flash LED briefly just to visually indicate successful power up
     SBI( PORTB , LED_DRIVE_BIT);
     _delay_ms(100);
     CBI( PORTB , LED_DRIVE_BIT);
@@ -898,8 +848,7 @@ int main(void)
     
     adc_off();      /// All done with the ADC, so same a bit of power      
 
-
-
+    // Normal operation from here (good battery voltage, not connected to a programmer)
        
 	PORTB |= 0x08;	        /* Enable pull up on PB3 for Button */ 
                         
@@ -933,8 +882,7 @@ int main(void)
     //DDRB = _BV(1);         // Only drive reset.
     
     // TODO: DO the breathing LED here for a while, driven off the timer Overflow
-    
-    
+        
     
     deepSleep();
         
@@ -973,32 +921,18 @@ int main(void)
 		ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
 		{
 			switch (current_mode) {
-			    case SEEK_START:
-				seek_start();
-				current_mode = SEEKING;
-				break;
-
-			    case SEEKING:
-				if (check_stc()) {
-					seek_stop();
-					current_mode = TUNE;
-				}
-				break;
 
 			    case SAVE:
-				current_chan = read_chan();
 				if (current_chan != eeprom_read_word(EEPROM_CHANNEL)) {
 					update_channel(current_chan);
 				}
 				display_mode = current_mode = NORMAL;
-				rssi2pwm();
 				break;
 
 			    case FACTORY_CONFIRM:
 				copy_factory_param();
 				tune_direct(eeprom_read_word(EEPROM_CHANNEL));
 				display_mode = current_mode = NORMAL;
-				rssi2pwm();
 				break;
 
 			    default:
@@ -1029,17 +963,11 @@ int main(void)
 				OCR1B = OCR1C;
 				break;
 
-			    default:
-				if ((ticks & 31) == 0) {
-					rssi2pwm();
-				}
-				break;
 			}
 
 			if ((current_mode != NORMAL) &&
 					((ticks - last_release) > TIMEOUT)) {
 				display_mode = current_mode = NORMAL;
-				rssi2pwm();
 			}
 		}
 
