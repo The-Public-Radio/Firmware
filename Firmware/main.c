@@ -440,6 +440,14 @@ static inline void set_shadow_reg(si4702_register reg, uint16_t value)
 	shadow[reg + 1] = value & 0xff;
 }
 
+// Read all the registers. The FM_IC starts reads at register 0x0a and then wraps around
+
+void si4702_read_registers(void)
+{
+    
+    USI_TWI_Read_Data( FMIC_ADDRESS , shadow , 0x10 * 2 );      // Total of 16 registers, each 2 bytes
+}
+
 /*
  * Just write registers 2 thru 7 inclusive from the shadow array.
  */
@@ -452,7 +460,7 @@ void si4702_write_registers(void)
     // Even though the datasheet says that the reserved bits of 0x07 must be Read before writing, 
     // The previous version of this software blindly wrote 0's and that seems to work fine. 
     
-    USI_TWI_Write_Data( FMIC_ADDRESS ,  &(shadow[REGISTER_02]) , (0x07 - 0x02) * 2 );
+    USI_TWI_Write_Data( FMIC_ADDRESS ,  &(shadow[REGISTER_02]) , (0x08 - 0x02) * 2 );
 }
 
 /*
@@ -498,7 +506,7 @@ void update_channel(uint16_t channel)
  * check_param_crc() -	Check EEPROM_PARAM_SIZE bytes starting at *base,
  *			and return whether the crc (last 2 bytes) is correct
  *			or not.
- *			Return 0 iff crc is good, !0 otherwise.
+ *			Return 0 if crc is good, !0 otherwise.
  */
 static uint16_t check_param_crc(const uint8_t *base)
 {
@@ -580,6 +588,22 @@ void fmic_start(void) {
             
 }     
 
+void debugBlink( uint8_t b ) {
+    
+    while (1) {
+         
+         for(int p=0; p<b; p++ ) {   
+            SBI( PORTB , LED_DRIVE_BIT);
+            _delay_ms(200);
+            CBI( PORTB , LED_DRIVE_BIT);
+            _delay_ms(200);
+            
+         }
+         
+         _delay_ms(1000);            
+            
+    }        
+}    
 
 void si4702_init(void)
 {
@@ -618,7 +642,7 @@ void si4702_init(void)
     SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
         
     _delay_us(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
-                                        // high) does not occur within 300 ns before the rising edge of RST.
+                                       // high) does not occur within 300 ns before the rising edge of RST.
                                         
                                         
     // Enable the pull-ups on the TWI lines
@@ -628,11 +652,31 @@ void si4702_init(void)
     // Reg 0x07 bit 15 - Crystal Oscillator Enable.
     // 0 = Disable (default).
     // 1 = Enable.
-
-	set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | 0x8000);
-
+    
+    // Reg 0x07 bits 13:0 - Reserved. If written, these bits should be read first and then written with their pre-existing values. Do not write during powerup.
+    
+    si4702_read_registers();
+	set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | _BV(15) );
 	si4702_write_registers();
 
+    /*
+        http://www.silabs.com/documents/public/application-notes/AN230.pdf
+        AN230 - 2.1.1 
+        If using the internal oscillator option, set the XOSCEN bit. Provide a sufficient delay before
+        setting the ENABLE bit to ensure that the oscillator has stabilized. The delay will vary depending on the external
+        oscillator circuit and the ESR of the crystal, and it should include margin to allow for device tolerances. The
+        recommended minimum delay is no less than 500 ms. A similar delay may be necessary for some external
+        oscillator circuits. Determine the necessary stabilization time for the clock source in the system.
+        To experimentally measure the minimum oscillator stabilization time, adjust the delay time between setting the
+        XOSCEN and ENABLE bits. After powerup, use the Set Property Command described in "5.1.Si4702/03
+        Commands (Si4702/03 Rev C or Later Device Only)" on page 31 to read property address 0x0700. If the delay
+        exceeds the minimum oscillator stabilization time, the property value will read 0x1980 ±20%. If the property
+        value is above this range, the delay time is too short. The selected delay time should include margin to allow for
+        device tolerances.
+    */
+
+
+    // TODO: Reduce this
 	_delay_ms(600);
 
 	/*
@@ -669,6 +713,7 @@ void si4702_init(void)
 	 * It looks like the radio tunes to <something> once enabled.
 	 * Make sure the STC bit is cleared by clearing the TUNE bit.
 	 */
+	si4702_read_registers();
 	set_shadow_reg(REGISTER_03, 0x0000);
 	si4702_write_registers();
 
@@ -679,7 +724,6 @@ void si4702_init(void)
 
 	si4702_write_registers();
 }
-
 
 /*
 
@@ -847,22 +891,18 @@ int main(void)
     
     
     adc_off();      /// All done with the ADC, so same a bit of power      
+    
 
     // Normal operation from here (good battery voltage, not connected to a programmer)
        
 	PORTB |= 0x08;	        /* Enable pull up on PB3 for Button */ 
                         
-	timer0_init();
+//	timer0_init();
 
-	timer1_init();
+//	timer1_init();
 
 	check_eeprom();
 
-
-    // Enable internal pull-ups on the 2-wire interface to the FM_IC
-    // This eliminates the need for external pull-ups
-    SBI( PORTB , FMIC_SCLK_BIT);
-    SBI( PORTB , FMIC_SDIO_BIT);
 
 	si4702_init();
     

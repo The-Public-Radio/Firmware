@@ -84,57 +84,101 @@ void USI_TWI_Master_Initialise( void )
 
 
 // Write a byte out to the slave and look for ACK bit
-// Assumes SCL low, returns with SCL low
+// Assumes SCL low, SDA doesn't matter
 
-// Returns 0=success
+// Returns 0=success, SDA high, SCL low. The ACK bit is still on SDA but will disapear on next SCL falling edge
 
 static unsigned char USI_TWI_Write_Byte( unsigned char data ) {
-
-          // Put all into a single byte 
     
     for( uint8_t bitMask=0b10000000; bitMask !=0; bitMask>>=1 ) {
         
-        // Clock in the address bits
-        
-        scl_drive_low();
-                
+        // setup data bit
+                        
         if ( data & bitMask) {
             sda_pull_high();
         } else {
             sda_drive_low();
-        }                        
+        }                
+        
+        // clock it out        
 
         _delay_us(BIT_TIME_US);
-        
+                
         scl_pull_high();           // Clock in the next address bit
         
         _delay_us(BIT_TIME_US);
+        
+        scl_drive_low();        
                         
     }        
-    
-    // Here SCL is high
-        
+            
     // The device acknowledges the address by driving SDIO
     // low after the next falling SCLK edge, for 1 cycle. 
         
     sda_pull_high();            // Pull SDA high so we can see if the salve is driving low
     _delay_us(BIT_TIME_US);     // Not needed, but so we can see what is happening on the scope
-    scl_drive_low();
-        
-    _delay_us(BIT_TIME_US);
+    scl_pull_high();
+    _delay_us(BIT_TIME_US);     // TODO: Don't need all these delays
     
-    uint8_t ret = sda_read();              // slave should be driving low now
-
+    uint8_t ret = sda_read();   // slave should be driving low now
+    scl_drive_low();            // Slave release
+    _delay_us(BIT_TIME_US);     
+    
     // TODO: CHeck ret
-    
-    scl_pull_high();                        // Clock out the ACK bit
-    _delay_us(BIT_TIME_US);
-    scl_drive_low();
-    _delay_us(BIT_TIME_US);    
-    
+        
     return(ret);        
         
 }
+
+// Read a byte from the slave and send ACK bit
+// Assumes SCL low, returns with SCL low
+// Assumed SDA pulled high
+
+// Returns 0=success, SDA high, SCL high
+
+static unsigned char USI_TWI_Read_Byte(void) {
+          
+    unsigned char data=0;
+    
+    for( uint8_t bitMask=0b10000000; bitMask !=0; bitMask>>=1 ) {
+        
+        // Clock in the address bits
+        
+        // TODO: Finish this
+                                
+        scl_pull_high();           // Clock in the next address bit
+        
+        _delay_us(BIT_TIME_US);
+        
+        if (sda_read()) {
+            
+            data |= bitMask;
+            
+        }            
+        
+        scl_drive_low();
+        
+        _delay_us(BIT_TIME_US);
+                                        
+    }      
+    
+    //After each byte of data is read,
+    //the controller IC must drive an acknowledge (SDIO = 0)
+    //if an additional byte of data will be requested. Data
+    //transfer ends with the STOP condition.         
+
+    sda_drive_low();            // Pull SDA high so we can see if the salve is driving low
+    _delay_us(BIT_TIME_US);     // Not needed, but so we can see what is happening on the scope       
+    scl_pull_high();            // Clock out the ACK bit    
+    _delay_us(BIT_TIME_US);
+    scl_drive_low();
+    sda_pull_high();    
+    _delay_us(BIT_TIME_US);
+    
+    return(data);            
+         
+}
+
 
 
 // WriteFlag=0 leaves in read mode
@@ -156,8 +200,9 @@ static unsigned char USI_TWI_Start( unsigned char addr , unsigned char readFlag)
     
     _delay_us(BIT_TIME_US);
     
-    scl_drive_low();    
-            
+    scl_drive_low();
+        
+                
     // A START condition is always followed by the (unique) 7-bit slave address (MSB first) and then w/r bit
         
     // The control word is latched internally on
@@ -171,21 +216,21 @@ static unsigned char USI_TWI_Start( unsigned char addr , unsigned char readFlag)
         
 }    
 
-// Write the words pointed to by data 
+// Write the bytes pointed to by buffer
 // addr is the chip bus address
 // assumes bus is idle on entry, Exists with bus idle
 // Returns 0 on success
 
-unsigned char USI_TWI_Write_Data(unsigned char addr, uint8_t *data , uint8_t count)
+unsigned char USI_TWI_Write_Data(unsigned char addr, uint8_t *buffer , uint8_t count)
 {
     
-    USI_TWI_Start( addr , 1 );      // TODO: check for error
+    USI_TWI_Start( addr , 0 );      // TODO: check for error
     
     while (count--) {
         
-        USI_TWI_Write_Byte( *data );
+        USI_TWI_Write_Byte( *buffer );
         
-        data++;
+        buffer++;
         
     }
     
@@ -200,6 +245,42 @@ unsigned char USI_TWI_Write_Data(unsigned char addr, uint8_t *data , uint8_t cou
     
     sda_pull_high();
     _delay_us(BIT_TIME_US);
+        
+    // End transaction with bus in idle
+    
+    return(0);
+    
+}
+
+// Fill data buffer with bytes read from TWI
+// addr is the chip bus address
+// assumes bus is idle on entry, Exists with bus idle
+// Returns 0 on success
+
+unsigned char USI_TWI_Read_Data(unsigned char addr, uint8_t *buffer , uint8_t count)
+{
+    
+    USI_TWI_Start( addr , 1 );      // TODO: check for error
+    
+    while (count--) {
+        
+        *buffer = USI_TWI_Read_Byte();
+        
+        buffer++;
+        
+    }
+    
+    // Data transfer ends with the STOP condition 
+    // (rising edge of SDIO while SCLK is high). 
+    
+    // TODO: Is this Really needed? Can we just do repeat starts and save this code? Spec is vague if address is reset on start. 
+    // TODO: Make stop function to save space
+    sda_drive_low();
+    scl_pull_high();
+    _delay_us(BIT_TIME_US);
+    
+    sda_pull_high();
+    _delay_us(BIT_TIME_US);
     
     
     // End transaction with bus in idle
@@ -207,6 +288,7 @@ unsigned char USI_TWI_Write_Data(unsigned char addr, uint8_t *data , uint8_t cou
     return(0);
     
 }
+
 
 // TODO: delete this placeholder
 
