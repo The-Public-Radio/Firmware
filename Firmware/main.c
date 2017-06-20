@@ -606,7 +606,7 @@ void debugBlink( uint8_t b ) {
 }    
 
 
-void si4702_init(void)
+void si4702_initw(void)
 {
 	/*
 	 * Init the Si4702 as follows:
@@ -698,7 +698,7 @@ void si4702_init(void)
 }
 
 
-void si4702_initnw(void)
+void si4702_init(void)
 {
 	/*
 	 * Init the Si4702 as follows:
@@ -812,6 +812,8 @@ void si4702_initnw(void)
 
 	si4702_write_registers();
 
+
+
 	_delay_ms(110);
 
 	/*
@@ -824,14 +826,29 @@ void si4702_initnw(void)
 	set_shadow_reg(REGISTER_03, 0x0000);
 	si4702_write_registers();
 
+
+
 	tune_direct(eeprom_read_word(EEPROM_CHANNEL));
+
+
 
 	set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
 				(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
 
 	si4702_write_registers();
     
-    while (1);
+    
+    
+    while (1) {
+        
+        for(uint8_t chan=1; chan<100;chan++) {
+            
+        	//tune_direct(chan);
+            debugBlink(1);
+            _delay_ms(1000);
+        
+        };
+        }        
 }
 
 /*
@@ -1008,9 +1025,9 @@ int main(void)
        
 	PORTB |= 0x08;	        /* Enable pull up on PB3 for Button */ 
                         
-	timer0_init();
+	//timer0_init();
 
-	timer1_init();
+	//timer1_init();
 
 	check_eeprom();
 
