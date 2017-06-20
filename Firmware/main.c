@@ -620,7 +620,8 @@ void si4702_init(void)
 	
 	si4702_read_registers();
 
-	set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | 0x8000);
+	set_shadow_reg(REGISTER_07, 0x8100);
+    //set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | 0x8000);
 
 	si4702_write_registers();
 
@@ -636,35 +637,44 @@ void si4702_init(void)
 	 */
 	set_shadow_reg(REGISTER_02, 0xE201);
 
-	/*
-	 * Set deemphasis based on eeprom.
-	 */
-	set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
-
-	set_shadow_reg(REGISTER_05,
-			(SEEK_RSSI_THRESHOLD << 8) |
-			(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
-			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4));
-
-	/*
-	 * Set the seek SNR and impulse detection thresholds.
-	 */
-	set_shadow_reg(REGISTER_06,
-			(SEEK_SNR_THRESHOLD << 4) | SEEK_IMPULSE_THRESHOLD);
-
 	si4702_write_registers();
 
 	_delay_ms(110);
 
+
+    // Bits 13:0 of register 07h must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
+	//set_shadow_reg(REGISTER_07,  0x3C04 );
+
+
+	/*
+	 * Set deemphasis based on eeprom.
+	 */
+	//set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
+
+	//set_shadow_reg(REGISTER_05,
+	//		(SEEK_RSSI_THRESHOLD << 8) |
+		//	(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
+			//(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4));
+
+	/*
+	 * Set the seek SNR and impulse detection thresholds.
+	 */
+	//set_shadow_reg(REGISTER_06,
+	//		(SEEK_SNR_THRESHOLD << 4) | SEEK_IMPULSE_THRESHOLD);
+
+
 	/*
 	 * It looks like the radio tunes to <something> once enabled.
 	 * Make sure the STC bit is cleared by clearing the TUNE bit.
+     *
+     * JML 6/20/17 - The clearing of TUNE bit does not seem to be nessisary, but the read_regs() is. Go figure, something must change somewhere.
 	 */
 	si4702_read_registers();
 	set_shadow_reg(REGISTER_03, 0x0000);
 	si4702_write_registers();
 
-	tune_direct(eeprom_read_word(EEPROM_CHANNEL));
+	//tune_direct(eeprom_read_word(EEPROM_CHANNEL));
+    set_shadow_reg(REGISTER_03, 0x8050 );                   //frequency = 103.5 MHz = 0.200 MHz x 80 + 87.5 MHz). Write data 8050h.
 
 	set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
 				(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
@@ -698,10 +708,10 @@ void rssi2pwm(void)
 
 int main(void)
 {
-	PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
+	//PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
     
-	DDRB |= _BV(OCR1B);     /* Set LED pin PB4 to output */
-    
+	//DDRB |= _BV(OCR1B);     /* Set LED pin PB4 to output */
+    /*
     adc_on();
     
     if (!VCC_GT(LOW_BATTERY_VOLTAGE)) {
@@ -778,15 +788,17 @@ int main(void)
     
     adc_off();      /// All done with the ADC, so same a bit of power       
     
-    _delay_ms(5000);                        
+    //_delay_ms(5000);                        
                 
-	timer0_init();
+	//timer0_init();
 
-	timer1_init();
+	//timer1_init();
 
-	check_eeprom();
-
+	//check_eeprom();
+*/
 	si4702_init();
+    
+    while(1);
 
 	sei();
 
