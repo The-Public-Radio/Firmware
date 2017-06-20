@@ -1060,21 +1060,20 @@ void deepSleep(void) {
 
 int main(void)
 {
-	PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
+	//PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
 
     // Set up the reset line to the FM_IC and AMP first so they are quiet. 
     // This eliminates the need for the external pull-down on this line. 
     
-
     
     SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, makes them sleep            
         
     // TODO: Enable DDR on LED pin but for now just use pull-up
-	//SBI( DDRB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
+	SBI( DDRB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
     
 	//PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
     
-	DDRB |= _BV(OCR1B);     /* Set LED pin PB4 to output */
+	//DDRB |= _BV(LED_DRIVE_BIT);     /* Set LED pin PB4 to output */
     
     // Flash LED briefly just to visually indicate successful power up
     SBI( PORTB , LED_DRIVE_BIT);
@@ -1168,8 +1167,8 @@ int main(void)
     
 
     // Normal operation from here (good battery voltage, not connected to a programmer)
+    
        
-	PORTB |= 0x08;	        /* Enable pull up on PB3 for Button */ 
                         
     //_delay_ms(5000);                        
 	//timer0_init();
@@ -1183,6 +1182,10 @@ int main(void)
     
     // TODO: Soft fade in the volume to avoid the "click" at turnon?
     //while(1);
+        
+    
+    SBI( DDRB , BUTTON_INPUT_BIT);              // Enable pull up on button 
+    
 
 	//sei();
     
