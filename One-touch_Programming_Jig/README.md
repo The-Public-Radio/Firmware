@@ -4,22 +4,6 @@ by Spencer Wright
 
 Updated by Spencer Wright 2015.01.21
 
-## Included 
-
-### Firmware
-
-The code that runs in the ATTINY25/45/85 on the TPR circuit board. 
-
-Compiled with either Atmel Studio 7 or AVR GCC tool chain. 
-
-### One-touch-programming jig
-
-An Arduino sketch that can program a TPR's user parameters though the battery clips on a production jig. 
-
-### EEPROM Utilites
-
-Sundry Python and shell scrip code for messing with the config data stored in a TPR's EEPROM.  
-
 ## LICENSE
 In the interest of collaboration and good will, the files herein are offered for public use. Just don't be a jerk about it, etc., and do let us know if we've screwed something really big up:).
 The Public Radio is licensed under a Creative Commons Attribution 4.0 License. For more info, visit https://creativecommons.org/licenses/by/4.0/
