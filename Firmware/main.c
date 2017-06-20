@@ -152,6 +152,7 @@
 #define FMIC_SDIO_BIT       PB0
 
 #define BUTTON_INPUT_BIT    PB3
+#define BUTTON_PCINT_BIT    PCINT3
 
 #define LOW_BATTERY_VOLTAGE (2.1)       // Below this, we will just blink LED and not turn on 
 
@@ -479,7 +480,10 @@ void tune_direct(uint16_t chan)
 	si4702_write_registers();
 }
 
-	
+uint16_t currentChanFromShadow(void) {
+    return( get_shadow_reg(REGISTER_03 & 0x1ff));
+}    
+
 /*
  * update_channel() -	Update the channel stored in the working params.
  *			Just change the 2 bytes @ EEPROM_CHANNEL,
@@ -681,6 +685,7 @@ void si4702_init(void)
 	/*
 	 * Set deemphasis based on eeprom.
 	 */
+    
 	set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
 
 	set_shadow_reg(REGISTER_05,
@@ -709,13 +714,33 @@ void si4702_init(void)
 	set_shadow_reg(REGISTER_03, 0x0000);
 	si4702_write_registers();
 
-	//tune_direct(eeprom_read_word(EEPROM_CHANNEL));
-    set_shadow_reg(REGISTER_03, 0x8050 );                   //frequency = 103.5 MHz = 0.200 MHz x 80 + 87.5 MHz). Write data 8050h.
+	tune_direct(eeprom_read_word(EEPROM_CHANNEL));
+    //set_shadow_reg(REGISTER_03, 0x8050 );                   //for testing, frequency = 103.5 MHz = 0.200 MHz x 80 + 87.5 MHz). Write data 8050h.
 
 	set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
 				(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
 
 	si4702_write_registers();
+    
+    /*
+    
+    Can you here the de-emphasis difference? I don't think so. 
+    
+    while (1) {
+
+	    set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | 0x0800 );
+        SBI( PORTB , LED_DRIVE_BIT );
+        si4702_write_registers();
+        _delay_ms(1000);
+	    set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) & ~0x0800 );
+        CBI( PORTB , LED_DRIVE_BIT );
+        si4702_write_registers();        
+        _delay_ms(1000);
+        
+           
+    } 
+    
+    */       
 }
 
 // Assumes FMIC_RESET is output and low
@@ -1056,6 +1081,52 @@ void deepSleep(void) {
 }   
 
 
+// Setup pin change interrupt on button 
+
+void initButton(void) 
+{
+ 
+     SBI( PORTB , BUTTON_INPUT_BIT);              // Enable pull up on button 
+    
+    /*
+        PCIE: Pin Change Interrupt Enable
+        When the PCIE bit is set (one) and the I-bit in the Status Register (SREG) is set (one), pin change interrupt is
+        enabled. Any change on any enabled PCINT[5:0] pin will cause an interrupt. The corresponding interrupt of Pin
+        Change Interrupt Request is executed from the PCI Interrupt Vector.         
+    */
+    
+    SBI( GIMSK , PCIE );   // turns on pin change interrupts
+    
+    /*
+        PCINT[5:0]: Pin Change Enable Mask 5:0
+        Each PCINT[5:0] bit selects whether pin change interrupt is enabled on the corresponding I/O pin. If PCINT[5:0] is
+        set and the PCIE bit in GIMSK is set, pin change interrupt is enabled on the corresponding I/O pin. If PCINT[5:0] is
+        cleared, pin change interrupt on the corresponding I/O pin is disabled.    
+    */
+    
+    SBI( PCMSK , BUTTON_PCINT_BIT );
+    
+    sei();                 // enables interrupts
+}    
+
+
+// Called on button press
+
+
+ISR( PCINT0_vect )
+{
+    
+    
+    SBI(PORTB , LED_DRIVE_BIT );
+    
+    tune_direct( currentChanFromShadow() + 1 );
+    
+    _delay_ms(200);
+    CBI(PORTB , LED_DRIVE_BIT );
+    
+    
+}
+
 
 
 int main(void)
@@ -1071,6 +1142,7 @@ int main(void)
     // TODO: Enable DDR on LED pin but for now just use pull-up
 	SBI( DDRB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
     
+    
 	//PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
     
 	//DDRB |= _BV(LED_DRIVE_BIT);     /* Set LED pin PB4 to output */
@@ -1079,6 +1151,7 @@ int main(void)
     SBI( PORTB , LED_DRIVE_BIT);
     _delay_ms(100);
     CBI( PORTB , LED_DRIVE_BIT);
+    
     
 	//DDRB |= _BV(OCR1B);     /* Set LED pin PB4 to output */
     
@@ -1184,8 +1257,9 @@ int main(void)
     //while(1);
         
     
-    SBI( DDRB , BUTTON_INPUT_BIT);              // Enable pull up on button 
+    initButton();
     
+    while(1);
 
 	//sei();
     
@@ -1204,6 +1278,8 @@ int main(void)
     //while (1);   
     
     deepSleep();
+    
+    debugBlink(3);
         
 
 	/*
