@@ -153,11 +153,15 @@
 
 #define BUTTON_INPUT_BIT    PB3
 #define BUTTON_PCINT_BIT    PCINT3
+#define LONG_PRESS_MS       (2000)      // Hold down button this long for a long press
+#define BUTTON_DEBOUNCE_MS  (50)        // How long to debounce button edges
 
 #define LOW_BATTERY_VOLTAGE (2.1)       // Below this, we will just blink LED and not turn on 
 
 #define SBI(port,bit) (port|=_BV(bit))
 #define CBI(port,bit) (port&=~_BV(bit))
+#define TBI(port,bit) (port&_BV(bit))
+
 
 typedef enum {
 	NORMAL = 1,
@@ -569,6 +573,7 @@ static void  copy_factory_param(void)
  *			The idea being that by the time this function returns,
  *			the eeprom has valid data in it that passes CRC.
  */
+
 void check_eeprom(void)
 {
 	if (check_param_crc(EEPROM_WORKING)) {
@@ -578,7 +583,6 @@ void check_eeprom(void)
 		copy_factory_param();
 	}
 }
-
 
 
 void debugBlink( uint8_t b ) {
@@ -956,14 +960,12 @@ debugBlink(5);
 // 	si4702_write_registers();
      
 
-    
-
 	/*
 	 * Set deemphasis based on eeprom.
 	 */
+    
 	set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
     
-
 	set_shadow_reg(REGISTER_05,
 			(SEEK_RSSI_THRESHOLD << 8) |
 			(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
@@ -976,8 +978,6 @@ debugBlink(5);
 			(SEEK_SNR_THRESHOLD << 4) | SEEK_IMPULSE_THRESHOLD);
 
 	si4702_write_registers();
-
-
 
 	_delay_ms(110);
 
@@ -992,10 +992,7 @@ debugBlink(5);
 	si4702_write_registers();
 
 
-
 	tune_direct(eeprom_read_word(EEPROM_CHANNEL));
-
-
 
 	set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
 				(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
@@ -1081,6 +1078,7 @@ void deepSleep(void) {
 }   
 
 
+
 // Setup pin change interrupt on button 
 
 void initButton(void) 
@@ -1110,21 +1108,65 @@ void initButton(void)
 }    
 
 
+// Returns true if button is down
+
+static inline uint8_t buttonDown(void) {
+    return( !TBI( PINB , BUTTON_INPUT_BIT ));           // Button is pulled high, short to ground when pressed
+}    
+
+
 // Called on button press
 
+/*
+
+    How it works. 
+    
+    Short press advances to netx station.
+
+*/
 
 ISR( PCINT0_vect )
 {
     
+    _delay_ms( BUTTON_DEBOUNCE_MS );        // Debounce down
     
-    SBI(PORTB , LED_DRIVE_BIT );
+    if (buttonDown()) {                     // We only care about button down events
+        
+        uint16_t currentChan = currentChanFromShadow();
+
+        uint16_t countdown = LONG_PRESS_MS;
     
-    tune_direct( currentChanFromShadow() + 1 );
+        while (countdown && buttonDown()) {       // Spin until either long press timeout or they let go
+            _delay_ms(1);          
+            countdown--;
+        }        
     
-    _delay_ms(200);
-    CBI(PORTB , LED_DRIVE_BIT );
+        if (countdown) {                            // Did not timeout, so short press
+        
+            // Advance to next station
+        
+            tune_direct(  currentChan + 1 );
+        
+        
+        } else {            // Initiated a long-press save to EEPROM            
+
+
+            // User feedback of long press with 200ms flash on LED
+            SBI(PORTB , LED_DRIVE_BIT );                         
+            
+            update_channel( currentChan );            
+            _delay_ms(200);
+            
+            CBI(PORTB , LED_DRIVE_BIT );
     
-    
+           
+        }    
+        
+        while (buttonDown());                   // Wait for button release
+        
+        _delay_ms( BUTTON_DEBOUNCE_MS );        // Debounce up
+        
+    }    
 }
 
 
@@ -1279,7 +1321,6 @@ int main(void)
     
     deepSleep();
     
-    debugBlink(3);
         
 
 	/*
@@ -1289,8 +1330,7 @@ int main(void)
 	 * Most importantly, Timers 0 & 1 and i2c keep going.
 	 */
 	set_sleep_mode(SLEEP_MODE_IDLE);
-    
- 
+     
 
 	while(1) {
 		uint16_t current_chan;
