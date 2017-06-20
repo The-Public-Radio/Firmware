@@ -829,7 +829,14 @@ int main(void)
         
         deepSleep();
         // Never get here since button int not enabled.
-        // 
+        
+        // Confirmed power usage in low battery mode @ 2.1V:
+        // 0.60mA while blinking
+        // 0.06mA while sleeping - probably most due to amp and FMIC?
+        
+        // TODO: Should probably periodically wake up durring normal playing and check for low battery
+        // so someone leaving it on does not run into the ground. 
+        
         
     }   
     
