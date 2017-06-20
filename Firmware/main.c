@@ -158,34 +158,11 @@
 
 #define LOW_BATTERY_VOLTAGE (2.1)       // Below this, we will just blink LED and not turn on 
 
+#define BREATH_COUNT_TIMEOUT (60)       // How many initial breaths should we take before going to sleep? Each breath currently about 2 secs.
+
 #define SBI(port,bit) (port|=_BV(bit))
 #define CBI(port,bit) (port&=~_BV(bit))
 #define TBI(port,bit) (port&_BV(bit))
-
-
-typedef enum {
-	NORMAL = 1,
-	TUNE,
-	SEEK_START,
-	SEEKING,
-	SAVE,
-	FACTORY_RESET,
-	FACTORY_CONFIRM,
-	TIMEOUT,
-} mode;
-
-mode current_mode = NORMAL;
-mode display_mode = NORMAL;
-
-/*
- * Timestamp of the last time the button was released.
- * Used for timeout.
- */
-uint16_t last_release = 0;
-
-#define TIMEOUT	(1000)	/* 10 seconds */
-
-volatile uint16_t ticks;
 
 typedef enum {
 	REGISTER_00 = 12,
@@ -228,209 +205,94 @@ const uint8_t last_resort_param[16] PROGMEM = {
 	0x6f, 0x6c,
 } ;
 
-/*
- * Seek thresholds - see Appendix of SiLabs AN230
- */
-#define	SEEK_RSSI_THRESHOLD	(10)
-#define	SEEK_SNR_THRESHOLD	(2)
-#define SEEK_IMPULSE_THRESHOLD	(4)
 
-void tune_direct(uint16_t);
-
-
-/*
- * Button press callout functions.
- */
-static void button_short(void)
-{
-	if (current_mode == TUNE) {
-		current_mode = SEEK_START;
-	}
-}
-
-static void button_2s(void)
-{
-	switch (current_mode) {
-	    case NORMAL:
-		current_mode = TUNE;
-		break;
-
-	    case TUNE:
-		current_mode = SAVE;
-		break;
-
-	    case FACTORY_RESET:
-		current_mode = FACTORY_CONFIRM;
-		break;
-
-	    default:
-		break;
-	}
-}
-
-static void led_2s(void)
-{
-	switch (current_mode) {
-	    case NORMAL:
-		display_mode = TUNE;
-		break;
-
-	    case TUNE:
-	    case FACTORY_RESET:
-		display_mode = SAVE;
-		break;
-
-	    default:
-		break;
-	}
-}
-
-static void button_4s(void)
-{
-	if (current_mode == TUNE) {
-		current_mode = FACTORY_RESET;
-	}
-}
-
-static void led_4s(void)
-{
-	if (current_mode == TUNE) {
-		display_mode = FACTORY_RESET;
-	}
-}
-
-struct dispatch {
-	uint16_t ticks;		/* 10mS per tick */
-	void (*callout)(void);
-	void (*display)(void);
-} ;
-
-const struct dispatch button_dispatch[] PROGMEM = {
-	{5, button_short, (void (*)(void))0},
-	{200, button_2s, led_2s},
-	{400, button_4s, led_4s},
-	{0, (void (*)(void))0, (void (*)(void))0},
-};
-
-/*
- * This is a bit longer than I would prefer, but the hot path when there
- * is no button press activity (button == 0x0f && ticks_active == 0) is
- * pretty benign.
- *
- * TODO: explore using pin change interrup on first press to skip this
- *       code completely in normal use.
- *
- * Called every tick (10mS), implement a dispatch table of functions
- * to call if the button is pressed for variable durations.
- *
- * Debounce on the leading edge of the button press by means of the 
- * dispatch table, and on the trailing edge by waiting until 4 consecutive
- * samples have read high (switch is active low.)
- *
- * Code is slightly complicated by the progmem access semantics of avr-libc,
- * whereby we must copy each object we wish to inspect/use.
- */
-void button_handle(uint8_t state)
-{
-	static uint16_t ticks_active = 0;
-	static uint8_t button = 0xff;
-	static const struct dispatch *dp = (struct dispatch *)0;
-
-	/*
-	 * Shift current button state into static variable button
-	 */
-	button = ((button << 1) | (state ? 1 : 0)) & 0X0f;
-
-	if (button == 0x0f) {
-		if (ticks_active) {
-			/*
-			 * button released & debounced for 4 ticks.
-			 */
-			if (dp) {
-				void (*dp_callout)(void) = (void (*)(void))pgm_read_word(&(dp->callout));
-				if (dp_callout != (void (*)(void))0) {
-					dp_callout();
-				}
-				dp = (struct dispatch *)0;
-			}
-			ticks_active = 0;
-			/*
-			 * remember the time the button was released.
-			 */
-			last_release = ticks;
-		}
-	} else {
-		const struct dispatch *p;
-		uint16_t dp_ticks;
-		/*
-		 * Button active.
-		 *
-		 * Scan the callout table, invoking the display callout as
-		 * we cross each threshold.
-		 * Only call the button press callout when the button
-		 * is released, so that we don't call every previous callout
-		 * for longer presses.
-		 */
-		if (ticks_active < UINT16_MAX) {
-			ticks_active++;
-		}
-		for (p = button_dispatch; (dp_ticks = pgm_read_word(&(p->ticks))) != 0;) {
-			if (dp_ticks == ticks_active) {
-				dp = p;
-				void (*dp_callout)(void) = (void (*)(void))pgm_read_word(&(p->display));
-				if (dp_callout != (void (*)(void))0) {
-					dp_callout();
-				}
-			}
-			p++;
-		}
-	}
-}
-
-void rssi2pwm(void);
-
-/*
- * Setup Timer 0 to provide a nominal 10mS timebase.
- * This is used to schedule events and also to debounce & time button presses.
- */
-void timer0_init(void)
-{
-	TCCR0B = 0;
-	OCR0A = 155;
-	TIMSK = 0x10;
-	TCCR0A = 0x02;
-	TCCR0B = 0x03;
-}
-
-/*
- * Once interrupts are enabled via sei(), this function will be called
- * @ approx 10mS intervals (100Hz).
- */
-ISR(TIM0_COMPA_vect)
-{
-	ticks++;
-
-	button_handle(PINB & 0x08);
-}
 
 /*
  * Setup Timer 1 to drive the LED using PWM on the OC1B pin (PB4)
  */
-void timer1_init(void)
+
+
+static void LED_PWM_init(void)
 {
-	TCCR1 = 0;
-	PLLCSR = 0x80;
+    
+    /*    
+        LSM: Low Speed Mode
+        The high speed mode is enabled as default and the fast peripheral clock is 64 MHz, but the low speed mode can
+        be set by writing the LSM bit to one. 
+        Then the fast peripheral clock is scaled down to 32 MHz. The low speed mode
+        must be set, if the supply voltage is below 2.7 volts, because the Timer/Counter1 is not running fast enough on low
+        voltage levels. It is highly recommended that Timer/Counter1 is stopped whenever the LSM bit is changed.    
+        
+    */
+    
+	PLLCSR = _BV( LSM );            // Low speed mode. 
+    
+    // We are going to run PWM mode
+    
+    
 	OCR1C = 255;
 	OCR1B = 0;
-	GTCCR = 0x60;
-
-	/*
-	 * Enable PB4 (OC1B) as output.
-	 */
-	DDRB |= 0x10;
-
-	TCCR1 = 0x84;
+    
 }
+
+
+static inline void LED_PWM_on(void) {
+
+    /*
+        PWM1B: Pulse Width Modulator B Enable
+        When set (one) this bit enables PWM mode based on comparator OCR1B in Timer/Counter1 and the counter
+        value is reset to $00 in the CPU clock cycle after a compare match with OCR1C register value.    
+      
+        Bits 5:4 – COM1B[1:0]: Comparator B Output Mode, Bits 1 and 0
+        The COM1B1 and COM1B0 control bits determine any output pin action following a compare match with compare
+        register B in Timer/Counter1. Since the output pin action is an alternative function to an I/O port, the corresponding
+        direction control bit must be set (one) in order to control an output pin.
+        In Normal mode, the COM1B1 and COM1B0 control bits determine the output pin actions that affect pin PB4
+        (OC1B) as described in Table 12-6. Note that OC1B is not connected in normal mode.        
+        
+        COM1B1=1 0 Clear the OC1B output line
+        
+    */
+    
+	TCCR1 = 0x84;
+    GTCCR = 0x60;    // PWM1B COM1B1 
+       
+
+}    
+
+
+// Turn off the timer to save power when we sleep. Also turns off the LED becuase it is disconnected from the timer so controlled by PORT. 
+
+static inline void LED_PWM_off(void) {
+    
+    TCCR1 = 0;              // Stop counter
+    GTCCR = 0x00;           // Disconnect OCR2B
+        
+}    
+
+static inline void setLEDBrightness( uint8_t b) {    
+    OCR1B = b;
+}    
+
+// Breath data thanks to Lady Ada
+
+const PROGMEM uint8_t breath_data[] =  {
+        
+ 1, 1, 2, 3, 5, 8, 11, 15, 20, 25, 30, 36, 43, 49, 56, 64, 72, 80, 88, 97, 105, 114, 123, 132, 141, 150, 158, 167, 175, 183, 191, 199, 206, 212, 219, 225, 230, 235, 240, 244, 247, 250, 252, 253, 254, 255, 254, 253, 252, 250, 247, 244, 240, 235, 230, 225, 219, 212, 206, 199, 191, 183, 175, 167, 158, 150, 141, 132, 123, 114, 105, 97, 88, 80, 72, 64, 56, 49, 43, 36, 30, 25, 20, 15, 11, 8, 5, 3, 2, 1, 0
+    
+};
+
+
+#define BREATH_LEN (sizeof( breath_data) / sizeof( *breath_data ))
+
+
+uint8_t breath(uint8_t step) {
+
+  uint8_t brightness = pgm_read_byte_near( breath_data + step);
+  return brightness;
+  
+}
+
 
 uint8_t shadow[32];
 
@@ -455,6 +317,7 @@ void si4702_read_registers(void)
 /*
  * Just write registers 2 thru 7 inclusive from the shadow array.
  */
+
 void si4702_write_registers(void)
 {
 	//USI_TWI_Start_Transceiver_With_Data(0x20, &(shadow[REGISTER_02]), 12);
@@ -631,27 +494,44 @@ void si4702_init(void)
 	/*
 	 * Init the Si4702 as follows:
 	 *
-	 * Set PB1 (/Reset on Si7202) as output, drive low.
-	 * Set PB0 (SDIO on si4702) as output, drive low.
-	 * Set PB1 (/Reset on Si7202) as output, drive high.
-	 * Set up USI in I2C (TWI) mode, reassigns PB0 as SDA.
-	 * Read all 16 registers into shadow array.
+	 * Set up USI in I2C (TWI) mode
+     * Enable pull-ups on TWI lines
 	 * Enable the oscillator (by writing to TEST1 & other registers)
 	 * Wait for oscillator to start
 	 * Enable the IC, set the config, tune to channel, then unmute output.
 	 */
 
-	DDRB |= 0x03;
-	PORTB &= ~(0x03);
-	_delay_ms(1);
-	PORTB |= 0x02;
-	_delay_ms(1);
+
+    // Let's do the magic dance to awaken the FM_IC in 2-wire mode
+    // We enter with RESET low (active)
+        
+    // Busmode selection method 1 requires the use of the
+    // GPIO3, SEN, and SDIO pins. To use this busmode
+    // selection method, the GPIO3 and SDIO pins must be
+    // sampled low by the device on the rising edge of RST.
+    // 
+    // The user may either drive the GPIO3 pin low externally,
+    // or leave the pin floating. If the pin is not driven by the
+    // user, it will be pulled low by an internal 1 M? resistor
+    // which is active only while RST is low. The user must
+    // drive the SEN and SDIO pins externally to the proper
+    // state.
+
+
+    // Drive SDIO low (GPIO3 will be pulled low internally by the FM_IC) 
+                
+    SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
+                                       // The direct bit was set to output when we first started in main()
+        
+    _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
+                                       // high) does not occur within 300 ns before the rising edge of RST.
+   
+                                           
+    // Enable the pull-ups on the TWI lines
 
 	USI_TWI_Master_Initialise();
+
 	
-	//si4702_read_registers();
-
-
     // Reg 0x07 bit 15 - Crystal Oscillator Enable.
     // 0 = Disable (default).
     // 1 = Enable.
@@ -661,11 +541,18 @@ void si4702_init(void)
    // si4702_read_registers();  
 
 	set_shadow_reg(REGISTER_07, 0x8100);
-    //set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | 0x8000);
 
 	si4702_write_registers();
 
-	_delay_ms(500);
+    /*
+
+        Wait for crystal to power up (required for crystal oscillator operation).
+        Provide a sufficient delay (minimum 500 ms) for the oscillator to stabilize. See 2.1.1. "Hardware Initialization”
+        step 5.    
+    
+    */
+
+	_delay_ms(600);
 
 	/*
 	 * Register 02 default settings:
@@ -675,12 +562,12 @@ void si4702_init(void)
 	 *	- Wrap on band edges during seek
 	 *	- Seek up
 	 */
+    
 	set_shadow_reg(REGISTER_02, 0xE201);
 
 	si4702_write_registers();
 
 	_delay_ms(110);
-
 
     // Bits 13:0 of register 07h must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
 	//set_shadow_reg(REGISTER_07,  0x3C04 );
@@ -693,7 +580,6 @@ void si4702_init(void)
 	set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
 
 	set_shadow_reg(REGISTER_05,
-			(SEEK_RSSI_THRESHOLD << 8) |
 			(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
 			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4));
 
@@ -751,46 +637,6 @@ void si4702_init(void)
 
 void si4702_init2(void)
 {
-	/*
-	 * Init the Si4702 as follows:
-	 *
-	 * Set up USI in I2C (TWI) mode
-     * Enable pull-ups on TWI lines
-	 * Enable the oscillator (by writing to TEST1 & other registers)
-	 * Wait for oscillator to start
-	 * Enable the IC, set the config, tune to channel, then unmute output.
-	 */
-
-
-    // Let's do the magic dance to awaken the FM_IC in 2-wire mode
-    // We enter with RESET low (active)
-        
-    // Busmode selection method 1 requires the use of the
-    // GPIO3, SEN, and SDIO pins. To use this busmode
-    // selection method, the GPIO3 and SDIO pins must be
-    // sampled low by the device on the rising edge of RST.
-    // 
-    // The user may either drive the GPIO3 pin low externally,
-    // or leave the pin floating. If the pin is not driven by the
-    // user, it will be pulled low by an internal 1 M? resistor
-    // which is active only while RST is low. The user must
-    // drive the SEN and SDIO pins externally to the proper
-    // state.
-
-
-    // Drive SDIO low (GPIO3 will be pulled low internally by the FM_IC) 
-                
-    SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
-                                       // The direct bit was set to output when we first started in main()
-        
-    _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
-                                       // high) does not occur within 300 ns before the rising edge of RST.
-   
-                                           
-    // Enable the pull-ups on the TWI lines
-
-	USI_TWI_Master_Initialise();
-
     
 
 
@@ -837,7 +683,7 @@ debugBlink(5);
     
     // Reg 0x07 bits 13:0 - Reserved. If written, these bits should be read first and then written with their pre-existing values. Do not write during powerup.
     // BUT Datasheet also says Bits 13:0 of register 07h must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
-   // si4702_read_registers();  
+      // si4702_read_registers();  
      
      
     /*
@@ -852,31 +698,6 @@ debugBlink(5);
 	set_shadow_reg(REGISTER_07, 0x8100 );
 	si4702_write_registers();
 
-    /*
-        http://www.silabs.com/documents/public/application-notes/AN230.pdf
-        AN230 - 2.1.1 
-        If using the internal oscillator option, set the XOSCEN bit. Provide a sufficient delay before
-        setting the ENABLE bit to ensure that the oscillator has stabilized. The delay will vary depending on the external
-        oscillator circuit and the ESR of the crystal, and it should include margin to allow for device tolerances. The
-        recommended minimum delay is no less than 500 ms. A similar delay may be necessary for some external
-        oscillator circuits. Determine the necessary stabilization time for the clock source in the system.
-        To experimentally measure the minimum oscillator stabilization time, adjust the delay time between setting the
-        XOSCEN and ENABLE bits. After powerup, use the Set Property Command described in "5.1.Si4702/03
-        Commands (Si4702/03 Rev C or Later Device Only)" on page 31 to read property address 0x0700. If the delay
-        exceeds the minimum oscillator stabilization time, the property value will read 0x1980 ±20%. If the property
-        value is above this range, the delay time is too short. The selected delay time should include margin to allow for
-        device tolerances.
-    */
-
-
-
-    /*
-
-        Wait for crystal to power up (required for crystal oscillator operation).
-        Provide a sufficient delay (minimum 500 ms) for the oscillator to stabilize. See 2.1.1. "Hardware Initialization”
-        step 5.    
-    
-    */
 
     // TODO: Reduce this
 	_delay_ms(600);
@@ -967,15 +788,8 @@ debugBlink(5);
 	set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
     
 	set_shadow_reg(REGISTER_05,
-			(SEEK_RSSI_THRESHOLD << 8) |
 			(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
 			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4));
-
-	/*
-	 * Set the seek SNR and impulse detection thresholds.
-	 */
-	set_shadow_reg(REGISTER_06,
-			(SEEK_SNR_THRESHOLD << 4) | SEEK_IMPULSE_THRESHOLD);
 
 	si4702_write_registers();
 
@@ -1078,13 +892,21 @@ void deepSleep(void) {
 }   
 
 
+// Returns true if button is down
+
+static inline uint8_t buttonDown(void) {
+    return( !TBI( PINB , BUTTON_INPUT_BIT ));           // Button is pulled high, short to ground when pressed
+}    
 
 // Setup pin change interrupt on button 
+// returns true of the button was down on entry
 
-void initButton(void) 
+uint8_t  initButton(void) 
 {
  
      SBI( PORTB , BUTTON_INPUT_BIT);              // Enable pull up on button 
+     
+     uint8_t ret = buttonDown();
     
     /*
         PCIE: Pin Change Interrupt Enable
@@ -1105,14 +927,11 @@ void initButton(void)
     SBI( PCMSK , BUTTON_PCINT_BIT );
     
     sei();                 // enables interrupts
+    
+    return ret;
 }    
 
 
-// Returns true if button is down
-
-static inline uint8_t buttonDown(void) {
-    return( !TBI( PINB , BUTTON_INPUT_BIT ));           // Button is pulled high, short to ground when pressed
-}    
 
 
 // Called on button press
@@ -1127,46 +946,69 @@ static inline uint8_t buttonDown(void) {
 
 ISR( PCINT0_vect )
 {
+
+    // Do nothing in ISR, just here so we can catch the interrupt and wake form deep sleep
+    // ISRs are ugly syemantics with voltaile access and stuff, simple to handle in main thread. 
+    
+   return;
+   
+}
+
+// Assumes button is actually down and LED_Timer is on
+
+void handleButtonDown(void) {
+    
+    setLEDBrightness(0);            // Led off when button goes down. Gives feedback if we are currently breathing otherwise benign
     
     _delay_ms( BUTTON_DEBOUNCE_MS );        // Debounce down
-    
-    if (buttonDown()) {                     // We only care about button down events
         
-        uint16_t currentChan = currentChanFromShadow();
+    uint16_t currentChan = currentChanFromShadow();
 
-        uint16_t countdown = LONG_PRESS_MS;
+    uint16_t countdown = LONG_PRESS_MS;
     
-        while (countdown && buttonDown()) {       // Spin until either long press timeout or they let go
-            _delay_ms(1);          
-            countdown--;
-        }        
+    while (countdown && buttonDown()) {       // Spin until either long press timeout or they let go
+        _delay_ms(1);          
+        countdown--;
+    }        
     
-        if (countdown) {                            // Did not timeout, so short press
+    if (countdown) {                            // Did not timeout, so short press
         
-            // Advance to next station
-        
-            tune_direct(  currentChan + 1 );
-        
-        
-        } else {            // Initiated a long-press save to EEPROM            
-
-
-            // User feedback of long press with 200ms flash on LED
-            SBI(PORTB , LED_DRIVE_BIT );                         
+        // Advance to next station
             
-            update_channel( currentChan );            
-            _delay_ms(200);
+        currentChan++;
             
-            CBI(PORTB , LED_DRIVE_BIT );
-    
+        // Input Frequency fRF 76 — 108 MHz
+            
+        if (currentChan > (1080-760) ) {        // Wrap at top of band back down to bottom
+                
+            currentChan = 0; 
+                
+        }                
+        
+        tune_direct(  currentChan );
+            
+        // TODO: test this (lots of button presses, so start high!)
+        
+        
+    } else {            // Initiated a long-press save to EEPROM            
+
+
+        // User feedback of long press with 200ms flash on LED
+        
+        setLEDBrightness(255);
+        
+            
+        update_channel( currentChan );            
+        _delay_ms(200);
+
+        setLEDBrightness(0);            
            
-        }    
-        
-        while (buttonDown());                   // Wait for button release
-        
-        _delay_ms( BUTTON_DEBOUNCE_MS );        // Debounce up
-        
     }    
+        
+    while (buttonDown());                   // Wait for button release
+        
+    _delay_ms( BUTTON_DEBOUNCE_MS );        // Debounce up
+        
 }
 
 
@@ -1206,18 +1048,26 @@ int main(void)
         // indicate dead battery with a 10%, 1Hz blink
         
         // TODO: Probably only need to blink for a minute and then go into deep sleep?
-            
-        while (1) {
+        
+        // NOTE that here we are dring the LED directly full on rather than PWM
+        // Since the battery is already low, this will give us max brightness.
+         
+         
+        for( uint8_t i=120; i>0; i--) {             // Blink for 2 minutes (120 seconds)
             
             SBI( PORTB , LED_DRIVE_BIT);
             _delay_ms(100);
             CBI( PORTB , LED_DRIVE_BIT);
             _delay_ms(900);
             
+            // Each cycle 100ms+900ms= ~1 second
+            
         }
         
         // We are not driving any pins except the RESET to keep the FM_IC and AMP asleep
         // and the LED which is low, so no Wasted power
+        
+        // Note that we never turned on the timer so this should be a very low power sleep. 
         
         deepSleep();
         // Never get here since button int not enabled.
@@ -1285,126 +1135,77 @@ int main(void)
     
        
                         
-    //_delay_ms(5000);                        
-	//timer0_init();
-
-	//timer1_init();
-
+	
     // TODO: Instate this test
-	//check_eeprom();
+    
+	check_eeprom();
 
 	si4702_init();
     
+    LED_PWM_init();          // Make it so we can pwm the LED for now on...
+    
+    LED_PWM_on(); 
+        
     // TODO: Soft fade in the volume to avoid the "click" at turnon?
     //while(1);
         
     
-    initButton();
-    
-    while(1);
-
-	//sei();
-    
-    
-    // TODO: Set up the button ISR to catch presses when sleeping. 
-    
-    // disable the FM chip
+    if (initButton()) {             // Was button down on startup?
         
-    //si4702_shutdown();
-                     
-    //PORTB &= ~_BV(1);       // Drive RESET low on the amp and FM chips, puts them to sleep
+        // TODO: How should this work?
+        
+        //copy_factory_param();       // Revert to initial config
+        
+    }        
     
-    //DDRB = _BV(1);         // Only drive reset.
+
+    uint8_t countdown_s = BREATH_COUNT_TIMEOUT;
     
-    // TODO: DO the breathing LED here for a while, driven off the timer Overflow
-    //while (1);   
-    
-    deepSleep();
+    while (countdown_s) {
+        
+        for(uint8_t cycle=0; cycle<BREATH_LEN; cycle++ ) { 
+        
+            setLEDBrightness( breath(cycle)  );
+        
+            _delay_ms(20);
+            
+            if (buttonDown()) {
+             
+                handleButtonDown(); 
+                
+                cycle=0;        // Start cycle over since it looks mucho más profesionales
+                   
+            }                
+            
+        }        
+        
+        countdown_s--;
+        
+    }        
     
         
-
-	/*
-	 * Set the sleep mode to idle when sleep_mode() is called.
-	 * This stops the CPU, but keeps all the peripherals and
-	 * the main oscillator running.
-	 * Most importantly, Timers 0 & 1 and i2c keep going.
-	 */
-	set_sleep_mode(SLEEP_MODE_IDLE);
-     
-
-	while(1) {
-		uint16_t current_chan;
-
-		/*
-		 * Foreground loop, where most of the intricate work gets done.
-		 * Operations like reading and writing to the 4702 via i2c
-		 * should happen here and not in interrupt context.
-		 */
-
-		/*
-		 * Sleep until woken by Timer 0. That means this loop will
-		 * run approx once per 10mS (less often if it takes
-		 * longer than that to get through this loop - duh.)
-		 */
-
-		sleep_mode();
-
-		/*
-		 * Button pushes will manipulate current_mode, track
-		 * and act upon the transitions here.
-		 */
-		ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-		{
-			switch (current_mode) {
-
-			    case SAVE:
-				if (current_chan != eeprom_read_word(EEPROM_CHANNEL)) {
-					update_channel(current_chan);
-				}
-				display_mode = current_mode = NORMAL;
-				break;
-
-			    case FACTORY_CONFIRM:
-				copy_factory_param();
-				tune_direct(eeprom_read_word(EEPROM_CHANNEL));
-				display_mode = current_mode = NORMAL;
-				break;
-
-			    default:
-				break;
-			}
-
-			switch (display_mode) {
-			    case TUNE:
-				/*
-				 * When in tune mode, flash 320mS on/off
-				 */
-				OCR1B = (ticks & 32) ? OCR1C : 0;
-				break;
-
-			    case FACTORY_RESET:
-				/*
-				 * When in factory reset mode, flash
-				 * 160mS on/off.
-				 */
-				OCR1B = (ticks & 16) ? OCR1C : 0;
-				break;
-
-			    case SAVE:
-				/*
-				 * When ready to save current channel
-				 * or confirm factory reset, on solid.
-				 */
-				OCR1B = OCR1C;
-				break;
-
-			}
-
-			if ((current_mode != NORMAL) &&
-					((ticks - last_release) > TIMEOUT)) {
-				display_mode = current_mode = NORMAL;
-			}
-		}
-
-	}
+    LED_PWM_off();       // Save power while sleeping (we don't need LED anymore unless we wake from button press    
+    
+    while (1) {
+        
+        // Every button interrupt wakes us up, so just go back to bed. 
+        
+        deepSleep();
+        
+        if (buttonDown()) {         // We only care about presses, not lifts
+            
+            LED_PWM_on();           // We are gonna want the PWM here when we loose the current limiting resistor. 
+            
+            handleButtonDown();
+            
+            LED_PWM_off();
+            
+        }            
+        
+    }        
+    
+    
+    // Never get here...
+    
+    
 }
