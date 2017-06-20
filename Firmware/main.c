@@ -906,28 +906,45 @@ int main(void)
     
            
 	check_eeprom();
-
-	si4702_init();
     
-    // Radio is now on and tuned
     
     LED_PWM_init();          // Make it so we can pwm the LED for now on...
     
     LED_PWM_on(); 
             
     if (initButton()) {             // Was button down on startup?
-        
-        
+                
         // TODO: How should this work?
         
         // I think only boot with factory params, but do not save - what if they are worse or button held accedentally?
         // Better to wait for release, and then a 2nd long press to save after you hear that it works. 
         // Definitely harder to implement because we need a working EEPROM image. 
         
-        //copy_factory_param();       // Revert to initial config
+        while (buttonDown()) {
+            
+            // Double blink while boot button down to indicate writing factory config
+            
+            setLEDBrightness(255);
+            _delay_ms(100);
+            setLEDBrightness(0);
+            _delay_ms(100);
+            setLEDBrightness(255);
+            _delay_ms(100);
+            setLEDBrightness(0);
+            _delay_ms(900);
+            
+            // TODO: Test this and maybe fix this for better behaivor. 
+            
+        }            
         
-    }        
+        copy_factory_param();       // Revert to initial config
+                        
+    }   
     
+	si4702_init();
+    // Radio is now on and tuned
+
+             
     // Breathe for a while so user knows we are alive in case not tuned to a good station or volume too low
 
     uint8_t countdown_s = BREATH_COUNT_TIMEOUT;
