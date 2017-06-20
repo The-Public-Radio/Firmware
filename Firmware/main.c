@@ -472,7 +472,7 @@ void tune_direct(uint16_t chan)
 
 	si4702_write_registers();
 
-	_delay_ms(60);
+	_delay_ms(160);
 
 	set_shadow_reg(REGISTER_03, get_shadow_reg(REGISTER_03) & ~0x8000);
 	si4702_write_registers();
@@ -606,6 +606,30 @@ void debugBlink( uint8_t b ) {
 }    
 
 
+void binaryDebugBlink( uint16_t b ) {
+    
+    while (1) {
+         
+         for(uint16_t bitmask=0x8000; bitmask !=0; bitmask>>=1) {
+
+            SBI( PORTB , LED_DRIVE_BIT);
+            _delay_ms(200);            
+             
+             if (b & bitmask) {
+                 _delay_ms(200);            
+             }            
+            CBI( PORTB , LED_DRIVE_BIT);
+            
+            _delay_ms(400);
+            
+         }
+         
+         _delay_ms(1000);            
+            
+    }        
+}    
+
+
 void si4702_initw(void)
 {
 	/*
@@ -697,8 +721,91 @@ void si4702_initw(void)
     while (1);
 }
 
-
 void si4702_init(void)
+{
+	/*
+	 * Init the Si4702 as follows:
+	 *
+	 * Set PB1 (/Reset on Si7202) as output, drive low.
+	 * Set PB0 (SDIO on si4702) as output, drive low.
+	 * Set PB1 (/Reset on Si7202) as output, drive high.
+	 * Set up USI in I2C (TWI) mode, reassigns PB0 as SDA.
+	 * Read all 16 registers into shadow array.
+	 * Enable the oscillator (by writing to TEST1 & other registers)
+	 * Wait for oscillator to start
+	 * Enable the IC, set the config, tune to channel, then unmute output.
+	 */
+
+//	DDRB |= 0x03;
+//	PORTB &= ~(0x03);
+//	_delay_ms(1);
+//	PORTB |= 0x02;
+//	_delay_ms(1);
+  SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
+                                       // The direct bit was set to output when we first started in main()
+        
+    _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
+                                       // high) does not occur within 300 ns before the rising edge of RST.
+   
+	USI_TWI_Master_Initialise();
+	
+	si4702_read_registers();
+
+	set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | 0x8000);
+
+	si4702_write_registers();
+
+	_delay_ms(600);
+
+	/*
+	 * Register 02 default settings:
+	 *	- Softmute enable
+	 *	- Mute enable
+	 *	- Mono
+	 *	- Wrap on band edges during seek
+	 *	- Seek up
+	 */
+	set_shadow_reg(REGISTER_02, 0xE201);
+
+	/*
+	 * Set deemphasis based on eeprom.
+	 */
+	set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
+
+	set_shadow_reg(REGISTER_05,
+			(SEEK_RSSI_THRESHOLD << 8) |
+			(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
+			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4));
+
+	/*
+	 * Set the seek SNR and impulse detection thresholds.
+	 */
+	set_shadow_reg(REGISTER_06,
+			(SEEK_SNR_THRESHOLD << 4) | SEEK_IMPULSE_THRESHOLD);
+
+	si4702_write_registers();
+
+	_delay_ms(110);
+
+	/*
+	 * It looks like the radio tunes to <something> once enabled.
+	 * Make sure the STC bit is cleared by clearing the TUNE bit.
+	 */
+	si4702_read_registers();
+	set_shadow_reg(REGISTER_03, 0x0000);
+	si4702_write_registers();
+
+	tune_direct(eeprom_read_word(EEPROM_CHANNEL));
+
+	set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
+				(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
+
+	si4702_write_registers();
+}
+
+// Assumes FMIC_RESET is output and low
+
+void si4702_init2(void)
 {
 	/*
 	 * Init the Si4702 as follows:
@@ -728,35 +835,77 @@ void si4702_init(void)
 
 
     // Drive SDIO low (GPIO3 will be pulled low internally by the FM_IC) 
-        
-    SBI( DDRB , FMIC_SDIO_BIT );  // Assumes the PORT bit is low, which it is on powerup.
-    _delay_ms(1);                 // Give it is microsecond to go low against pin capacitance. 
-        
+                
     SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
                                        // The direct bit was set to output when we first started in main()
         
     _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
                                        // high) does not occur within 300 ns before the rising edge of RST.
    
-   
-	DDRB |= 0x03;
-	PORTB &= ~(0x03);
-	_delay_ms(1);
-	PORTB |= 0x02;
-	_delay_ms(1);                                       
-                                        
+                                           
     // Enable the pull-ups on the TWI lines
 
 	USI_TWI_Master_Initialise();
-	
+
+    
+
+
+
+    /*
+    
+    
+USI_TWI_Write_Data( FMIC_ADDRESS , "\x55" , 1 );
+debugBlink(5);
+    
+    
+       si4702_read_registers();    
+    
+
+    binaryDebugBlink( get_shadow_reg(REGISTER_00) );
+    
+    
+    if ( get_shadow_reg(REGISTER_02) != 0 ) {
+        //debugBlink(2);
+    }            
+
+    set_shadow_reg(REGISTER_02 , 0xE000 );
+            
+    si4702_write_registers();
+        
+    set_shadow_reg(REGISTER_02 , 0 );    
+        
+    si4702_read_registers();    
+    
+    binaryDebugBlink( get_shadow_reg(REGISTER_02) );
+    
+    if ( get_shadow_reg(REGISTER_02) == 0xe000 ) {
+        debugBlink(3);
+    }            
+    
+    debugBlink(4);
+    
+    
+*/
+    
     // Reg 0x07 bit 15 - Crystal Oscillator Enable.
     // 0 = Disable (default).
     // 1 = Enable.
     
     // Reg 0x07 bits 13:0 - Reserved. If written, these bits should be read first and then written with their pre-existing values. Do not write during powerup.
+    // BUT Datasheet also says Bits 13:0 of register 07h must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
+   // si4702_read_registers();  
+     
+     
+    /*
     
-    si4702_read_registers();    
-	set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | _BV(15) );
+        Write address 07h (required for crystal oscillator operation).
+        Set the XOSCEN bit to power up the crystal.
+        Example: Write data 8100h.
+    
+    */
+          
+    
+	set_shadow_reg(REGISTER_07, 0x8100 );
 	si4702_write_registers();
 
     /*
@@ -776,8 +925,84 @@ void si4702_init(void)
     */
 
 
+
+    /*
+
+        Wait for crystal to power up (required for crystal oscillator operation).
+        Provide a sufficient delay (minimum 500 ms) for the oscillator to stabilize. See 2.1.1. "Hardware Initialization”
+        step 5.    
+    
+    */
+
     // TODO: Reduce this
 	_delay_ms(600);
+
+   /*
+        6. Si4703-C19 Errata Solution 2: Set RDSD = 0x0000. Note that this is a writable register 
+   */
+
+    // TODO: Is this necessary? SHould be set to zero on power up, so maybe this only applies to coming out of sleep?
+
+	set_shadow_reg(REGISTER_15, 0x0000 );
+	si4702_write_registers();
+    
+    
+    /*
+        Write address 02h (required).
+         Set the DMUTE bit to disable mute. Optionally mute can be disabled later when audio is needed.
+         Set the ENABLE bit high to set the powerup state.
+         Set the DISABLE bit low to set the powerup state.
+        Example: Write data 4001h.    
+        
+    */   
+    
+    
+	set_shadow_reg(REGISTER_02, 0x4001 );           
+	si4702_write_registers();
+    
+    /*
+    si4702_read_registers();
+    
+    if ( get_shadow_reg(REGISTER_02) & 0x4000 == 0x04000 ) {
+        debugBlink(3);
+    }            
+    
+    debugBlink(4);
+ 
+    */
+
+    /*
+        Wait for device powerup (required).
+        Refer to the Powerup Time specification in Table 7 "FM Characteristics" of the data sheet.
+    */
+
+    // HUH? Not in table 7 or anywhere. Thaks for nothing. 
+    
+    // TODO: Reduce this...
+    _delay_ms(500);
+    
+    // Next lets set volume full blast...
+    
+    // Set bottom 4 bits of 05. 1111 = 0 dBFS.
+	set_shadow_reg(REGISTER_05, get_shadow_reg(REGISTER_05) | 0x0f );         
+	si4702_write_registers();
+    
+    
+    // Next lets tune a station
+
+//	set_shadow_reg(REGISTER_02, _BV(15) | ((uint8_t) ( ( 93.9-87.5) / ( 0.200 )))  );           
+	//si4702_write_registers();
+
+	set_shadow_reg(REGISTER_03, 0x8050 );           
+	si4702_write_registers();
+    
+    _delay_ms(500);
+    
+	set_shadow_reg(REGISTER_03, 0x0050 );           
+	si4702_write_registers();
+
+    
+    debugBlink(6);
 
 	/*
 	 * Register 02 default settings:
@@ -928,8 +1153,8 @@ int main(void)
     
     SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, makes them sleep            
         
-    
-	SBI( PORTB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
+    // TODO: Enable DDR on LED pin but for now just use pull-up
+	//SBI( DDRB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
     
     
     // Flash LED briefly just to visually indicate successful power up
@@ -1029,14 +1254,14 @@ int main(void)
 
 	//timer1_init();
 
-	check_eeprom();
-
+    // TODO: Instate this test
+	//check_eeprom();
 
 	si4702_init();
     
     // TODO: Soft fade in the volume to avoid the "click" at turnon?
 
-	sei();
+	//sei();
     
     
     // TODO: Set up the button ISR to catch presses when sleeping. 
@@ -1050,7 +1275,7 @@ int main(void)
     //DDRB = _BV(1);         // Only drive reset.
     
     // TODO: DO the breathing LED here for a while, driven off the timer Overflow
-        
+    while (1);   
     
     deepSleep();
         
