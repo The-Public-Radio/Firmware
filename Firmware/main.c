@@ -770,7 +770,7 @@ void handleButtonDown(void) {
         
             
         update_channel( currentChan );            
-        _delay_ms(200);
+        _delay_ms(500);
 
         setLEDBrightness(0);            
            
