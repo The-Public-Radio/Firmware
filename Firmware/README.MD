@@ -5,21 +5,52 @@ This firmware runs inside the ATTINY25/45/85 inside The Public Radio.
 More info at...
 http://www.thepublicrad.io/
 
+## TODO
+
+Factory revert behavior not implemented pending review.
+
+Removal of SDA pull-up resistor (and all associated code) not implemented pending getting logical analyzer back from Pete! 
+
+Breath blink. 
+
+Confirm 100Khz steps.
+
+Confirm change de-empassis on wrap? Do we even need it at all?
+
+Use lower band by default? Or maybe only on wrap? 
+
+
+
 ## Quick start
 
 Install two AA batteries.    
 
-Turn the knob clockwise until it clicks to turn the unit on. Turn more clockwise makes it louder. 
+Turn the knob clockwise until it clicks to turn on. Turn more clockwise makes it louder.
 
-If you don't hear anything, check the LED. If it is flashing, then your batteries are too low, If you see nothing, then the batteries are dead.
+You should hear your programmed station. If not, see troubleshooting below.   
 
-If you want to change the station, press and release the button. Each time you will go up 0.1Mhz. Keep pressing until you get to the station you want.
+Turn the knob counter clockwise until clicks to turn off. 
 
-To save the currently playing station, press and hold the button. You should see the LED blink after about 2 seconds. Now that station will play the next time you turn on.
+ ### Troubleshooting
 
-If you want to go back to the station your unit was programmed for when you got it, turn it off and then hold down the button while you turn it on. You should see the LED flash 3 times quickly. To save this as your default station, press and hold the button for 2 seconds until the LED blinks.  
+If you don't hear anything, check the LED. 
 
-Turn counter clockwise until it clicks to turn off. 
+* If it is flashing, then your batteries are too low. replace them. 
+* If you see nothing, then the batteries are dead or not installed. Fix that.
+* If it is breathing, then either...
+    * The volume is turned too low. Make it louder
+    * The programmed station is not tuning in. Press and release the button until you get to a station that works (and you like), then press and hold the button for 2 seconds to save that station for next time.
+    
+
+
+## Changing the default programmed station 
+
+Press and release the button until you find a new station that you like. Each time you will go up 0.1Mhz. 
+
+To save the currently playing station as the new default, press and hold the button. You should see the LED blink after about 2 seconds. Now that station will play the next time you turn on.
+
+If you want to go back to the station your unit was programmed with when you got it, turn it off and then hold down the button while you turn it back on. You should see the LED flash 3 times quickly. To save this as your default station, press and hold the button for 2 seconds until the LED blinks.  
+
 
 ## User interface
 
