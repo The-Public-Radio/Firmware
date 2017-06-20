@@ -605,78 +605,48 @@ void debugBlink( uint8_t b ) {
     }        
 }    
 
+
 void si4702_init(void)
 {
 	/*
 	 * Init the Si4702 as follows:
 	 *
-	 * Set up USI in I2C (TWI) mode
-     * Enable pull-ups on TWI lines
+	 * Set PB1 (/Reset on Si7202) as output, drive low.
+	 * Set PB0 (SDIO on si4702) as output, drive low.
+	 * Set PB1 (/Reset on Si7202) as output, drive high.
+	 * Set up USI in I2C (TWI) mode, reassigns PB0 as SDA.
+	 * Read all 16 registers into shadow array.
 	 * Enable the oscillator (by writing to TEST1 & other registers)
 	 * Wait for oscillator to start
 	 * Enable the IC, set the config, tune to channel, then unmute output.
 	 */
 
-
-    // Let's do the magic dance to awaken the FM_IC in 2-wire mode
-    // We enter with RESET low (active)
-        
-    // Busmode selection method 1 requires the use of the
-    // GPIO3, SEN, and SDIO pins. To use this busmode
-    // selection method, the GPIO3 and SDIO pins must be
-    // sampled low by the device on the rising edge of RST.
-    // 
-    // The user may either drive the GPIO3 pin low externally,
-    // or leave the pin floating. If the pin is not driven by the
-    // user, it will be pulled low by an internal 1 M? resistor
-    // which is active only while RST is low. The user must
-    // drive the SEN and SDIO pins externally to the proper
-    // state.
-
-
-    // Drive SDIO low (GPIO3 will be pulled low internally by the FM_IC) 
-        
-    SBI( DDRB , FMIC_SDIO_BIT );  // Assumes the PORT bit is low, which it is on powerup.
-    _delay_us(1);                 // Give it is microsecond to go low against pin capacitance. 
-        
-    SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
-        
-    _delay_us(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
-                                       // high) does not occur within 300 ns before the rising edge of RST.
-                                        
-                                        
-    // Enable the pull-ups on the TWI lines
+	DDRB |= 0x03;
+	PORTB &= ~(0x03);
+	_delay_ms(1);
+	PORTB |= 0x02;
+	_delay_ms(1);
 
 	USI_TWI_Master_Initialise();
 	
-    // Reg 0x07 bit 15 - Crystal Oscillator Enable.
-    // 0 = Disable (default).
-    // 1 = Enable.
+	si4702_read_registers();
     
-    // Reg 0x07 bits 13:0 - Reserved. If written, these bits should be read first and then written with their pre-existing values. Do not write during powerup.
     
-    si4702_read_registers();
-	set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | _BV(15) );
+    //Crystal Oscillator Enable.
+    //0 = Disable (default).
+    //1 = Enable.
+    //The internal crystal oscillator requires an external 32.768 kHz crystal as shown in
+    //2. "Typical Application Schematic" on page 14. The oscillator must be enabled before
+    //powerup (ENABLE = 1) as shown in Figure 9, ï¿½Initialization Sequence,ï¿½ on page 21. It
+    //should only be disabled after powerdown (ENABLE = 0). Bits 13:0 of register 07h
+    //must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
+    //Refer to Si4702/03 Internal Crystal Oscillator Errata.    
+
+	set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | 0x8000);
+//	set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | 0x3C04);
+
 	si4702_write_registers();
 
-    /*
-        http://www.silabs.com/documents/public/application-notes/AN230.pdf
-        AN230 - 2.1.1 
-        If using the internal oscillator option, set the XOSCEN bit. Provide a sufficient delay before
-        setting the ENABLE bit to ensure that the oscillator has stabilized. The delay will vary depending on the external
-        oscillator circuit and the ESR of the crystal, and it should include margin to allow for device tolerances. The
-        recommended minimum delay is no less than 500 ms. A similar delay may be necessary for some external
-        oscillator circuits. Determine the necessary stabilization time for the clock source in the system.
-        To experimentally measure the minimum oscillator stabilization time, adjust the delay time between setting the
-        XOSCEN and ENABLE bits. After powerup, use the Set Property Command described in "5.1.Si4702/03
-        Commands (Si4702/03 Rev C or Later Device Only)" on page 31 to read property address 0x0700. If the delay
-        exceeds the minimum oscillator stabilization time, the property value will read 0x1980 ±20%. If the property
-        value is above this range, the delay time is too short. The selected delay time should include margin to allow for
-        device tolerances.
-    */
-
-
-    // TODO: Reduce this
 	_delay_ms(600);
 
 	/*
@@ -723,6 +693,141 @@ void si4702_init(void)
 				(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
 
 	si4702_write_registers();
+    
+    while (1);
+}
+
+
+void si4702_initnw(void)
+{
+	/*
+	 * Init the Si4702 as follows:
+	 *
+	 * Set up USI in I2C (TWI) mode
+     * Enable pull-ups on TWI lines
+	 * Enable the oscillator (by writing to TEST1 & other registers)
+	 * Wait for oscillator to start
+	 * Enable the IC, set the config, tune to channel, then unmute output.
+	 */
+
+
+    // Let's do the magic dance to awaken the FM_IC in 2-wire mode
+    // We enter with RESET low (active)
+        
+    // Busmode selection method 1 requires the use of the
+    // GPIO3, SEN, and SDIO pins. To use this busmode
+    // selection method, the GPIO3 and SDIO pins must be
+    // sampled low by the device on the rising edge of RST.
+    // 
+    // The user may either drive the GPIO3 pin low externally,
+    // or leave the pin floating. If the pin is not driven by the
+    // user, it will be pulled low by an internal 1 M? resistor
+    // which is active only while RST is low. The user must
+    // drive the SEN and SDIO pins externally to the proper
+    // state.
+
+
+    // Drive SDIO low (GPIO3 will be pulled low internally by the FM_IC) 
+        
+    SBI( DDRB , FMIC_SDIO_BIT );  // Assumes the PORT bit is low, which it is on powerup.
+    _delay_ms(1);                 // Give it is microsecond to go low against pin capacitance. 
+        
+    SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
+                                       // The direct bit was set to output when we first started in main()
+        
+    _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
+                                       // high) does not occur within 300 ns before the rising edge of RST.
+   
+   
+	DDRB |= 0x03;
+	PORTB &= ~(0x03);
+	_delay_ms(1);
+	PORTB |= 0x02;
+	_delay_ms(1);                                       
+                                        
+    // Enable the pull-ups on the TWI lines
+
+	USI_TWI_Master_Initialise();
+	
+    // Reg 0x07 bit 15 - Crystal Oscillator Enable.
+    // 0 = Disable (default).
+    // 1 = Enable.
+    
+    // Reg 0x07 bits 13:0 - Reserved. If written, these bits should be read first and then written with their pre-existing values. Do not write during powerup.
+    
+    si4702_read_registers();    
+	set_shadow_reg(REGISTER_07, get_shadow_reg(REGISTER_07) | _BV(15) );
+	si4702_write_registers();
+
+    /*
+        http://www.silabs.com/documents/public/application-notes/AN230.pdf
+        AN230 - 2.1.1 
+        If using the internal oscillator option, set the XOSCEN bit. Provide a sufficient delay before
+        setting the ENABLE bit to ensure that the oscillator has stabilized. The delay will vary depending on the external
+        oscillator circuit and the ESR of the crystal, and it should include margin to allow for device tolerances. The
+        recommended minimum delay is no less than 500 ms. A similar delay may be necessary for some external
+        oscillator circuits. Determine the necessary stabilization time for the clock source in the system.
+        To experimentally measure the minimum oscillator stabilization time, adjust the delay time between setting the
+        XOSCEN and ENABLE bits. After powerup, use the Set Property Command described in "5.1.Si4702/03
+        Commands (Si4702/03 Rev C or Later Device Only)" on page 31 to read property address 0x0700. If the delay
+        exceeds the minimum oscillator stabilization time, the property value will read 0x1980 ±20%. If the property
+        value is above this range, the delay time is too short. The selected delay time should include margin to allow for
+        device tolerances.
+    */
+
+
+    // TODO: Reduce this
+	_delay_ms(600);
+
+	/*
+	 * Register 02 default settings:
+	 *	- Softmute enable
+	 *	- Mute enable
+	 *	- Mono
+	 *	- Wrap on band edges during seek
+	 *	- Seek up
+	 */
+	set_shadow_reg(REGISTER_02, 0xE201);
+
+	/*
+	 * Set deemphasis based on eeprom.
+	 */
+	set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
+    
+
+	set_shadow_reg(REGISTER_05,
+			(SEEK_RSSI_THRESHOLD << 8) |
+			(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
+			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4));
+
+	/*
+	 * Set the seek SNR and impulse detection thresholds.
+	 */
+	set_shadow_reg(REGISTER_06,
+			(SEEK_SNR_THRESHOLD << 4) | SEEK_IMPULSE_THRESHOLD);
+
+	si4702_write_registers();
+
+	_delay_ms(110);
+
+	/*
+	 * It looks like the radio tunes to <something> once enabled.
+	 * Make sure the STC bit is cleared by clearing the TUNE bit.
+	 */
+    
+    
+	si4702_read_registers();
+	set_shadow_reg(REGISTER_03, 0x0000);
+	si4702_write_registers();
+
+	tune_direct(eeprom_read_word(EEPROM_CHANNEL));
+
+	set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
+				(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
+
+	si4702_write_registers();
+    
+    while (1);
 }
 
 /*
@@ -797,6 +902,8 @@ int main(void)
 
     // Set up the reset line to the FM_IC and AMP first so they are quiet. 
     // This eliminates the need for the external pull-down on this line. 
+    
+
     
     SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, makes them sleep            
         
@@ -897,9 +1004,9 @@ int main(void)
        
 	PORTB |= 0x08;	        /* Enable pull up on PB3 for Button */ 
                         
-//	timer0_init();
+	timer0_init();
 
-//	timer1_init();
+	timer1_init();
 
 	check_eeprom();
 
