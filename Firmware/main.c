@@ -450,19 +450,23 @@ void check_eeprom(void)
 
 void debugBlink( uint8_t b ) {
     
-    while (1) {
          
-         for(int p=0; p<b; p++ ) {   
-            SBI( PORTB , LED_DRIVE_BIT);
-            _delay_ms(200);
-            CBI( PORTB , LED_DRIVE_BIT);
-            _delay_ms(200);
-            
-         }
+    for(int p=0; p<b; p++ ) {   
+        SBI( PORTB , LED_DRIVE_BIT);
+        _delay_ms(10);
+        CBI( PORTB , LED_DRIVE_BIT);
+        _delay_ms(200);            
+    }
          
-         _delay_ms(1000);            
+    _delay_ms(1000);            
             
-    }        
+}    
+
+void debugshortblink(void) {
+    SBI( PORTB , LED_DRIVE_BIT);
+    _delay_ms(50);
+    CBI( PORTB , LED_DRIVE_BIT);
+    _delay_ms(50);                
 }    
 
 
@@ -845,10 +849,14 @@ int main(void)
         
         // Ok, we are currently being powered by a programmer since a battery could not make the voltage go this high
         
+        // The VccProg stuff depends on the ADC,which is already on here. 
+        
+        // DDRB |= _BV(0);     // Show the search window for testing
+        
         while (1) {
             
-            
-            uint8_t r1;
+            int r1;
+
             
             // Try to read in two bytes from the programmer. 
             // This will timeout and fail if we wait longer then 40ms
@@ -858,33 +866,15 @@ int main(void)
             
             if (r1>=0) {
                 
-                uint8_t r2;
+                if (r1==77) { 
+                    debugBlink( 2 );
+                } else {
+                    debugBlink( 3 );
+                }                                        
                 
-                r2=readPbyte();
-                    
-                if (r2>=0) {
-                    
-                    // If we got here, then we received two bytes from the programmer
-                    
-                    uint16_t channel = (r1<<8) | (r2);      // build the channel word, MSB first. 
-                       
-                    update_channel(channel);                // Update the EEPROM and recalc the CRC
-                    
-                    // Done programming! Signal to the world with a fast blink!
-                    
-                    while (1) {
-
-                        PORTB|=_BV(LED_DRIVE_BIT);
-                        _delay_ms(50);
-                        PORTB&=~_BV(LED_DRIVE_BIT);
-                        _delay_ms(50);
-                        
-                    }
-                    
-                }
                 
-            }                                                            
-            
+            }                                
+                   
             
         }
         

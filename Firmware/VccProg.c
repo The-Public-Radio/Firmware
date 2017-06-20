@@ -42,18 +42,17 @@ uint8_t programmingVoltagePresent() {
 // Returns -1 if error
 // Assumes we are >PROGRAM_V on entry
 
-#define PP_TIMEOUT_US  40000       // Time to wait for initial sync pulse before timing out
-#define PP_DP_DELAY_US 15000       // Delay from sync pulse to start looking for data pulse
+#define PP_TIMEOUT_US  20000       // Time to wait for initial sync pulse before timing out
+#define PP_DP_DELAY_US  5000       // Delay from sync pulse to start looking for data pulse
 #define PP_DP_SEACH_US 10000       // Time window to look for data pulse
-#define PP_MARGIN_US    5000       // delay from end of data pulse window to start looking for next sync pulse
-
+#define PP_MARGIN_US    1000       // delay from end of data pulse window to start looking for next sync pulse
 
 
 int readPbit(void) {
     
     uint16_t sp_countdown = PP_TIMEOUT_US / ADC_DELAY_US;      // Wait up to 20ms for a sync pulse
         
-    while ( !PROGRAM_V_TEST() ) {
+    while ( programmingVoltagePresent() ) {             // Wait for falling edge to signal start of sync pulse
         
         sp_countdown--;
         
@@ -66,7 +65,7 @@ int readPbit(void) {
     }
             
     // just got beginning of sync
-    // It take about 5ms for the voltage to rise back up to the threshold after the pulse
+    // It takes about 5ms for the voltage to rise back up to the threshold after the pulse
     // so we delay 7.5ms so we can be...
     // 2.5ms after we should be back above threshold, 
     // and 2.5ms before scheduled next data bit pulse...
@@ -74,38 +73,34 @@ int readPbit(void) {
     _delay_us( PP_DP_DELAY_US );          
 
            
-    if ( PROGRAM_V_TEST() ) {      // we should have risen back above threshold 5ms ago...
+    if ( !programmingVoltagePresent() ) {      // we should have risen back above threshold 5ms ago...
                         
         return(-2);                             // if not, then something is wrong. 
                 
     }                
                     
-    uint8_t dp_countdown = PP_DP_SEACH_US/ADC_DELAY_US;      // window for the data pulse
+    uint16_t dp_countdown = PP_DP_SEACH_US/ADC_DELAY_US;      // window for the data pulse
             
     uint8_t bitflag = 0;                   // Did we get a data pulse? Is this a 1 bit?
     
+    // PORTB |= _BV(0);         // Show the seartch window for testing
     
-    while ( dp_countdown--  && !bitflag ) {
+    while ( dp_countdown-- ) {
         
-        if ( PROGRAM_V_TEST() ) {
+        if ( !programmingVoltagePresent() ) {       // If we see a pulse in the window, then receive a 1 bit
             
             bitflag =1 ;
                         
         }        
                                         
-    }                                    
+    }                                        
     
+    // PORTB &= ~_BV(0);        // Show the search window for testing
+
         
-    if (bitflag) {
-        
-        _delay_us( PP_DP_DELAY_US );        // This is a 1 bit, so wait for voltage to rise again. 
-        
-    }        
-    
-    // If a zero bit, we will just start searching sooner, but next bit will come soooner than timeout.
-    
-        
-    if ( PROGRAM_V_TEST()  ) {                  // we should have risen back above threshold 5ms ago...
+    _delay_us( PP_MARGIN_US );        // Wait before looking for next pulse.
+               
+    if ( !programmingVoltagePresent() ) {                  // we should have risen back above threshold 5ms ago...
                 
         return(-3);                             // if not, then something is wrong. 
                 
@@ -128,7 +123,7 @@ int readPbyte(void) {
         
         int bit = readPbit();
         
-        if (bit<0) return( bit);        // Error;
+        if (bit<0) return( bit );        // Error;
         
         if (bit!=0) byte |= bitmask;
         

@@ -5,17 +5,16 @@
 
 void setup() {
 
-// Pins A0 and A1 used to power the attached TPR
+// Pins A0, A1, and A2 used to power the attached TPR
   
-  DDRC  = 0b00000011;       // Output
-  PORTC = 0b00000111;       // Drive both pins high
+  DDRC  = 0b00000111;       // Output
+  PORTC = 0b00000111;       // Drive output pins high
   
   Serial.begin(9600);
   while (! Serial); // Wait until Serial is ready 
   Serial.println("Enter LED Number 0 to 7 or 'x' to clear"); 
 
 }
-
 
 
 /**
@@ -31,7 +30,7 @@ void setup() {
  *  Once TPR see the 5V, it starts listening for data bits. 
  *  
  *  Becuase of streched out signals due to the decoupling cap, the comunication channel is all about 
- *  high to low transitions which happen quickly. THis gives a variable ammount of for the voltage to 
+ *  high to low transitions which happen quickly. This gives a variable ammount of for the voltage to 
  *  rise back up again. If we were to sample at fixed times, maybe the voltage was too slow to rise, or
  *  too quick and we would get wrong samples. 
  *  
@@ -56,37 +55,35 @@ void setup() {
  *    
  *  Checksum handled by higher frame layer. 
  *  
- *  If you ever Wait longer than 20ms for a pulse, then you abort the byte and frame and start seaching again.
+ *  If you ever wait longer than 40ms for a pulse, then you abort the byte and frame and start seaching again.
  *  
  *  TODO: Add hystereis to voltage thresholds?
- *  TODO: Make boltage levels relative rather than absolutle?
+ *  TODO: Make voltage levels relative rather than absolutle?
  * 
  */
 
 
 void sendbit(int b) {
 
-    PORTC = 0b00000000;
+    PORTC = 0b00000000;         // Send sync pulse
     delay(1);
     PORTC = 0b00000111;
-    delay(4);
+    delay(9);
 
-    delay(15);    
      
     if (b) {
 
       PORTC = 0b00000000;
       delay(1);
       PORTC = 0b00000111;
-      delay(4);
+      delay(9);
 
     } else {
 
-      delay(5);
+      delay(10);
      
     }
 
-    delay(15);    
 }
 
 
@@ -120,7 +117,7 @@ void loop() {
       //uint8_t led = ch - '0';    
 
       sendbyte(led);
-      sendbyte(led);
+      //sendbyte(led);
 
       Serial.println( led );
                 
