@@ -637,7 +637,7 @@ void si4702_init(void)
     //1 = Enable.
     //The internal crystal oscillator requires an external 32.768 kHz crystal as shown in
     //2. "Typical Application Schematic" on page 14. The oscillator must be enabled before
-    //powerup (ENABLE = 1) as shown in Figure 9, ï¿½Initialization Sequence,ï¿½ on page 21. It
+    //powerup (ENABLE = 1) as shown in Figure 9, “Initialization Sequence,” on page 21. It
     //should only be disabled after powerdown (ENABLE = 0). Bits 13:0 of register 07h
     //must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
     //Refer to Si4702/03 Internal Crystal Oscillator Errata.    
@@ -787,7 +787,11 @@ void si4702_initnw(void)
 	 *	- Wrap on band edges during seek
 	 *	- Seek up
 	 */
-	set_shadow_reg(REGISTER_02, 0xE201);
+	set_shadow_reg(REGISTER_02, 0xE201);       
+// 	si4702_write_registers();
+     
+
+    
 
 	/*
 	 * Set deemphasis based on eeprom.
