@@ -7,18 +7,15 @@ http://www.thepublicrad.io/
 
 ## TODO
 
-Factory revert behavior not implemented pending review.
+Review factory revert behavior. 
 
 Removal of SDA pull-up resistor (and all associated code) not implemented pending getting logical analyzer back from Pete! 
 
-Breath blink. 
-
-Confirm 100Khz steps.
+Confirm fixed 100Khz steps.
 
 Confirm change de-empassis on wrap? Do we even need it at all?
 
-Use lower band by default? Or maybe only on wrap? 
-
+Use lower band by default? Or maybe only on wrap?
 
 
 ## Quick start
@@ -49,7 +46,7 @@ Press and release the button until you find a new station that you like. Each ti
 
 To save the currently playing station as the new default, press and hold the button. You should see the LED blink after about 2 seconds. Now that station will play the next time you turn on.
 
-If you want to go back to the station your unit was programmed with when you got it, turn it off and then hold down the button while you turn it back on. You should see the LED flash 3 times quickly. To save this as your default station, press and hold the button for 2 seconds until the LED blinks.  
+If you want to go back to the station your unit was programmed with when you got it, turn it off and then hold down the button while you turn it back on. You should see the LED flash twice quickly. Release the button to restore the configuration (if you turn power off before releasing, then the initial configuration will not be saved). 
 
 
 ## User interface
@@ -64,19 +61,19 @@ When the knob is in the off position, the unit is unpowered. When the knob is on
 
 ### Low battery indication
 
-On power up, if the battery voltage is too low for operation, the LED will short blink (about 100ms) twice. This blink pattern will repeat once per second for about 1 minute and then the unit will go into deep sleep. If this happens, replace the batteries with fresh ones. 
+On power up, if the battery voltage is too low for operation, the LED will short blink (about 100ms) about once per second. This blink pattern will repeat once per second for about 2 minutes and then the unit will go into deep sleep. If this happens, replace the batteries with fresh ones. 
 
 ### User configuration
 
 The user can change the programmed station using the push button. Power must be on and the batteries must be good. 
 
-A short press (<2 seconds) of the button will advances the next frequency. The advance happens on the button release.  Each press advances the tunes frequency by 100Khz, so if you are listening to 93.9Mhz and you short press once, you will be at 94.0Mhz. Use repeated presses to find the desired station. The station will wrap back to the bottom when it gets to the top of the valid frequency band.  
+A short press (<2 seconds) of the button advances the next channel. The advance happens on the button release.  Each press advances the tunes frequency by 100Khz, so if you are listening to 93.9Mhz and you short press once, you will be at 94.0Mhz. Use repeated presses to find the desired station. The station will wrap back to the bottom when it gets to the top of the valid frequency band.  
 
-A long press (<2 seconds) of the button stores the current station into EEPROM. A 0.5 second flash on the LED confirms that the station was stored. This station will be loaded the next time the unit powers up. 
+A long press (<2 seconds) of the button stores the current station into EEPROM. A long (0.5 second) flash on the LED confirms that the station was stored. This station will be loaded the next time the unit powers up. 
 
 Note that if you advance the station with short presses and do not save with a long press, then the unit will revert to the previously stored station on next power up.
 
-To load the station programmed when the unit initially shipped to the user, press and hold the button during power-up. The unit will indicate that the initial station was loaded with 3 short flashes on the LED. To save this initial station to the EEPROM, release the button and then long press (see above). 
+To load the station programmed when the unit initially shipped to the user, press and hold the button during power-up. The unit will indicate that it is ready to load the initial config 2 short flashes on the LED. To save this initial station to the EEPROM, release the button.
 
 ## Theory of operation
 
@@ -90,8 +87,6 @@ The ATTINY boots and...
 6. Goes to deep sleep, only to be woken on a button press.
 7. On release of a short button press, advances to the next station on the dial. 
 8. On release of a long button press, stores the current station in EEPROM.
-
-
 
 
 ## TWI library

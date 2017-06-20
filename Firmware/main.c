@@ -796,20 +796,7 @@ int main(void)
         
     // TODO: Enable DDR on LED pin but for now just use pull-up
 	SBI( DDRB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
-    
-    
-	//PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
-    
-	//DDRB |= _BV(LED_DRIVE_BIT);     /* Set LED pin PB4 to output */
-    
-    // Flash LED briefly just to visually indicate successful power up
-    SBI( PORTB , LED_DRIVE_BIT);
-    _delay_ms(100);
-    CBI( PORTB , LED_DRIVE_BIT);
-    
-    
-	//DDRB |= _BV(OCR1B);     /* Set LED pin PB4 to output */
-    
+            
     adc_on();
     
     if (!VCC_GT(LOW_BATTERY_VOLTAGE)) {
