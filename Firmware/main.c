@@ -562,16 +562,24 @@ void si4702_init(void)
 	 *	- Wrap on band edges during seek
 	 *	- Seek up
 	 */
-    
+        
 	set_shadow_reg(REGISTER_02, 0xE201);
 
 	si4702_write_registers();
+    
+    /*    
+        Software should wait for the powerup
+        time (as specified by Table 8, “FM Receiver
+        Characteristics1,2,” on page 12) before continuing with
+        normal part operation.  
+        
+        Powerup Time From powerdown
+        (Write ENABLE bit to 1)
+        max 110 ms        
+          
+    */    
 
 	_delay_ms(110);
-
-    // Bits 13:0 of register 07h must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
-	//set_shadow_reg(REGISTER_07,  0x3C04 );
-
 
 	/*
 	 * Set deemphasis based on eeprom.
@@ -584,15 +592,6 @@ void si4702_init(void)
 			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4));
 
 
-    // JML: Never seek, so no need to set this stuff
-
-	/*
-	 * Set the seek SNR and impulse detection thresholds.
-	 */
-	//set_shadow_reg(REGISTER_06,
-	//		(SEEK_SNR_THRESHOLD << 4) | SEEK_IMPULSE_THRESHOLD);
-
-
 	/*
 	 * It looks like the radio tunes to <something> once enabled.
 	 * Make sure the STC bit is cleared by clearing the TUNE bit.
@@ -600,12 +599,16 @@ void si4702_init(void)
      * JML - The clearing of TUNE bit does not seem to be nessisary, but the read_regs() is. Go figure, something must change somewhere.
      * TODO: Find out what is changed on this read and hardcode it so we can dump the whole read function.
 	 */
+    
 	si4702_read_registers();
 	set_shadow_reg(REGISTER_03, 0x0000);
 	si4702_write_registers();
 
 	tune_direct(eeprom_read_word(EEPROM_CHANNEL));
     //set_shadow_reg(REGISTER_03, 0x8050 );                   //for testing, frequency = 103.5 MHz = 0.200 MHz x 80 + 87.5 MHz). Write data 8050h.
+
+
+    // Pump up the volume
 
 	set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
 				(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
@@ -632,232 +635,6 @@ void si4702_init(void)
     
     */       
 }
-
-// Assumes FMIC_RESET is output and low
-
-void si4702_init2(void)
-{
-    
-
-
-
-    /*
-    
-    
-USI_TWI_Write_Data( FMIC_ADDRESS , "\x55" , 1 );
-debugBlink(5);
-    
-    
-       si4702_read_registers();    
-    
-
-    binaryDebugBlink( get_shadow_reg(REGISTER_00) );
-    
-    
-    if ( get_shadow_reg(REGISTER_02) != 0 ) {
-        //debugBlink(2);
-    }            
-
-    set_shadow_reg(REGISTER_02 , 0xE000 );
-            
-    si4702_write_registers();
-        
-    set_shadow_reg(REGISTER_02 , 0 );    
-        
-    si4702_read_registers();    
-    
-    binaryDebugBlink( get_shadow_reg(REGISTER_02) );
-    
-    if ( get_shadow_reg(REGISTER_02) == 0xe000 ) {
-        debugBlink(3);
-    }            
-    
-    debugBlink(4);
-    
-    
-*/
-    
-    // Reg 0x07 bit 15 - Crystal Oscillator Enable.
-    // 0 = Disable (default).
-    // 1 = Enable.
-    
-    // Reg 0x07 bits 13:0 - Reserved. If written, these bits should be read first and then written with their pre-existing values. Do not write during powerup.
-    // BUT Datasheet also says Bits 13:0 of register 07h must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
-      // si4702_read_registers();  
-     
-     
-    /*
-    
-        Write address 07h (required for crystal oscillator operation).
-        Set the XOSCEN bit to power up the crystal.
-        Example: Write data 8100h.
-    
-    */
-          
-    
-	set_shadow_reg(REGISTER_07, 0x8100 );
-	si4702_write_registers();
-
-
-    // TODO: Reduce this
-	_delay_ms(600);
-
-   /*
-        6. Si4703-C19 Errata Solution 2: Set RDSD = 0x0000. Note that this is a writable register 
-   */
-
-    // TODO: Is this necessary? SHould be set to zero on power up, so maybe this only applies to coming out of sleep?
-
-	set_shadow_reg(REGISTER_15, 0x0000 );
-	si4702_write_registers();
-    
-    
-    /*
-        Write address 02h (required).
-         Set the DMUTE bit to disable mute. Optionally mute can be disabled later when audio is needed.
-         Set the ENABLE bit high to set the powerup state.
-         Set the DISABLE bit low to set the powerup state.
-        Example: Write data 4001h.    
-        
-    */   
-    
-    
-	set_shadow_reg(REGISTER_02, 0x4001 );           
-	si4702_write_registers();
-    
-    /*
-    si4702_read_registers();
-    
-    if ( get_shadow_reg(REGISTER_02) & 0x4000 == 0x04000 ) {
-        debugBlink(3);
-    }            
-    
-    debugBlink(4);
- 
-    */
-
-    /*
-        Wait for device powerup (required).
-        Refer to the Powerup Time specification in Table 7 "FM Characteristics" of the data sheet.
-    */
-
-    // HUH? Not in table 7 or anywhere. Thaks for nothing. 
-    
-    // TODO: Reduce this...
-    _delay_ms(500);
-    
-    // Next lets set volume full blast...
-    
-    // Set bottom 4 bits of 05. 1111 = 0 dBFS.
-	set_shadow_reg(REGISTER_05, get_shadow_reg(REGISTER_05) | 0x0f );         
-	si4702_write_registers();
-    
-    
-    // Next lets tune a station
-
-//	set_shadow_reg(REGISTER_02, _BV(15) | ((uint8_t) ( ( 93.9-87.5) / ( 0.200 )))  );           
-	//si4702_write_registers();
-
-	set_shadow_reg(REGISTER_03, 0x8050 );           
-	si4702_write_registers();
-    
-    _delay_ms(500);
-    
-	set_shadow_reg(REGISTER_03, 0x0050 );           
-	si4702_write_registers();
-
-    
-    debugBlink(6);
-
-	/*
-	 * Register 02 default settings:
-	 *	- Softmute enable
-	 *	- Mute enable
-	 *	- Mono
-	 *	- Wrap on band edges during seek
-	 *	- Seek up
-	 */
-	set_shadow_reg(REGISTER_02, 0xE201);       
-// 	si4702_write_registers();
-     
-
-	/*
-	 * Set deemphasis based on eeprom.
-	 */
-    
-	set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
-    
-	set_shadow_reg(REGISTER_05,
-			(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
-			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4));
-
-	si4702_write_registers();
-
-	_delay_ms(110);
-
-	/*
-	 * It looks like the radio tunes to <something> once enabled.
-	 * Make sure the STC bit is cleared by clearing the TUNE bit.
-	 */
-    
-    
-	si4702_read_registers();
-	set_shadow_reg(REGISTER_03, 0x0000);
-	si4702_write_registers();
-
-
-	tune_direct(eeprom_read_word(EEPROM_CHANNEL));
-
-	set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
-				(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
-
-	//si4702_write_registers();
-    
-    
-    
-    while (1) {
-        
-        for(uint8_t chan=1; chan<100;chan++) {
-            
-        	//tune_direct(chan);
-            debugBlink(1);
-            _delay_ms(1000);
-        
-        };
-        }        
-}
-
-/*
-
-To place device in power down mode:
-
-1. (Optional) Set the AHIZEN bit high to maintain a dc bias of
-0.5 x VIO volts at the LOUT and ROUT pins while in
-powerdown, but preserve the states of the other bits in
-Register 07h. Note that in powerup the LOUT and ROUT
-pins are set to the common mode voltage specified in
-Table 8 on page 12, regardless of the state of AHIZEN.
-
-2. Set the ENABLE bit high and the DISABLE bit high to
-place the device in powerdown mode. Note that all register
-states are maintained so long as VIO is supplied and the
-RST pin is high.
-
-3. (Optional) Remove RCLK.
-
-4. Remove VA and VD supplies as needed.                                                                     
-
-We will only do #2
-
-*/
-
-
-void si4702_shutdown(void) {
-
-	set_shadow_reg(REGISTER_02, _BV(6) | _BV(0) );      // Set both ENABLE and DISABLE to enter powerdown mode
-	si4702_write_registers();    
-    
-}    
 
 
 void debug_slowblink(void) {
@@ -901,7 +678,7 @@ static inline uint8_t buttonDown(void) {
 // Setup pin change interrupt on button 
 // returns true of the button was down on entry
 
-uint8_t  initButton(void) 
+uint8_t initButton(void) 
 {
  
      SBI( PORTB , BUTTON_INPUT_BIT);              // Enable pull up on button 
@@ -934,15 +711,7 @@ uint8_t  initButton(void)
 
 
 
-// Called on button press
-
-/*
-
-    How it works. 
-    
-    Short press advances to netx station.
-
-*/
+// Called on button press pin change interrupt
 
 ISR( PCINT0_vect )
 {
@@ -955,6 +724,8 @@ ISR( PCINT0_vect )
 }
 
 // Assumes button is actually down and LED_Timer is on
+// Always waits for the debounced up before returning
+
 
 void handleButtonDown(void) {
     
@@ -987,7 +758,7 @@ void handleButtonDown(void) {
         
         tune_direct(  currentChan );
             
-        // TODO: test this (lots of button presses, so start high!)
+        // TODO: test this wrap (lots of button presses, so start high!)
         
         
     } else {            // Initiated a long-press save to EEPROM            
@@ -1133,31 +904,31 @@ int main(void)
 
     // Normal operation from here (good battery voltage, not connected to a programmer)
     
-       
-                        
-	
-    // TODO: Instate this test
-    
+           
 	check_eeprom();
 
 	si4702_init();
     
+    // Radio is now on and tuned
+    
     LED_PWM_init();          // Make it so we can pwm the LED for now on...
     
     LED_PWM_on(); 
-        
-    // TODO: Soft fade in the volume to avoid the "click" at turnon?
-    //while(1);
-        
-    
+            
     if (initButton()) {             // Was button down on startup?
         
+        
         // TODO: How should this work?
+        
+        // I think only boot with factory params, but do not save - what if they are worse or button held accedentally?
+        // Better to wait for release, and then a 2nd long press to save after you hear that it works. 
+        // Definitely harder to implement because we need a working EEPROM image. 
         
         //copy_factory_param();       // Revert to initial config
         
     }        
     
+    // Breathe for a while so user knows we are alive in case not tuned to a good station or volume too low
 
     uint8_t countdown_s = BREATH_COUNT_TIMEOUT;
     
@@ -1184,11 +955,11 @@ int main(void)
     }        
     
         
-    LED_PWM_off();       // Save power while sleeping (we don't need LED anymore unless we wake from button press    
+    LED_PWM_off();       // Save power while sleeping (we don't need LED anymore unless we wake from button press)   
     
     while (1) {
         
-        // Every button interrupt wakes us up, so just go back to bed. 
+        // Any button state change will wake us up
         
         deepSleep();
         
@@ -1196,7 +967,7 @@ int main(void)
             
             LED_PWM_on();           // We are gonna want the PWM here when we loose the current limiting resistor. 
             
-            handleButtonDown();
+            handleButtonDown();     // Always wait for the debounced up before returning
             
             LED_PWM_off();
             
