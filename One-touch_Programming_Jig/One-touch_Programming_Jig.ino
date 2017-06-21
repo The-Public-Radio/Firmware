@@ -114,20 +114,23 @@ void sendpacket( uint16_t channel  , uint8_t band, uint8_t deemphassis , uint8_t
 
   uint16_t crc = 0x0000;
 
-  sendbyte( channel >> 8 );
-  
+  sendbyte( channel >> 8 );  
   crc = _crc16_update(crc, channel>>8 );   
             
   sendbyte( channel & 0xff );
   crc = _crc16_update(crc, channel & 0xff );    
 
-  /*
+/*
+
+
+  sendbyte( deemphassis );
+  crc = _crc16_update(crc, deemphassis );  
+
 
   sendbyte( band );
   crc = _crc16_update(crc, band );    
 
-  sendbyte( deemphassis );
-  crc = _crc16_update(crc, deemphassis );    
+  
 
   sendbyte( spacing );
   crc = _crc16_update(crc, spacing );    

@@ -401,7 +401,7 @@ void update_facotry_config(uint16_t channel , uint8_t band, uint8_t deemphassis 
 
 	eeprom_write_word((uint16_t *)EEPROM_CRC16, crc);
     
-    
+    /*
     // Now copy to factory default EEPROM
     
     const uint8_t *src= EEPROM_WORKING;
@@ -412,6 +412,7 @@ void update_facotry_config(uint16_t channel , uint8_t band, uint8_t deemphassis 
 		eeprom_write_byte(dest, eeprom_read_byte(src));
 	}
     
+    */
     
 }
 
@@ -850,7 +851,15 @@ int readProgrammingPacket(void) {
     
     channel |= d;                              // Byte 2: channel low byte    
 
+
 /*
+
+    d = readPbyte();    
+    if (d<0) return(d); // Check for error    
+    crc = _crc16_update(crc, d );    
+    
+    uint8_t deemphasis = d;
+
         
     d = readPbyte();    
     if (d<0) return(d); // Check for error    
@@ -858,14 +867,6 @@ int readProgrammingPacket(void) {
     
     uint8_t band = d;
     
-    d = readPbyte();    
-    if (d<0) return(d); // Check for error    
-    crc = _crc16_update(crc, d );    
-    
-    uint8_t deemphasis = d;
-    
-
-
     d = readPbyte();    
     if (d<0) return(d); // Check for error    
     crc = _crc16_update(crc, d );    
@@ -903,15 +904,9 @@ int readProgrammingPacket(void) {
     //update_facotry_config(channel , band, deemphasis , spacing );
     
     update_facotry_config(channel , 0, 0 , 0 );
-        
-    if (eeprom_read_word(EEPROM_CHANNEL)==channel) {
-        
-        debugBlink(2);
-        
-    }        else {
-        
-    debugBlink(3);                          // two short blinks = programming accepted
-    }    
+                
+    debugBlink(2);          // two short blinks = programming accepted
+    
     return(0); 
                     
 }    
@@ -981,14 +976,8 @@ int main(void)
         
         // DDRB |= _BV(0);     // Show the search window for testing
         
-        while (1) {
-                                        
-                readProgrammingPacket();                   
-            
-        }
-        
-        // Never get here, there is no way out of programming mode except power cycle                    
-        
+        while (readProgrammingPacket());      // wait for a darn good programming packet
+                    
     }     
     
     
