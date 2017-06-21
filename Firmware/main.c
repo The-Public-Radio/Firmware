@@ -976,7 +976,17 @@ int main(void)
         
         // DDRB |= _BV(0);     // Show the search window for testing
         
-        while (readProgrammingPacket());      // wait for a darn good programming packet
+        while (1) {
+        
+            readProgrammingPacket();      // wait for a darn good programming packet
+            
+        }
+        
+        // Never get here.
+        // Would be nice to power up for a test now, but not enough current.
+        // Maybe need more pins or a better contact surface.             
+        
+        
                     
     }     
     
