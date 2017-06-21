@@ -1,5 +1,5 @@
 
-
+#include <util/crc16.h>
 
 
 
@@ -12,7 +12,6 @@ void setup() {
   
   Serial.begin(9600);
   while (! Serial); // Wait until Serial is ready 
-  Serial.println("Enter LED Number 0 to 7 or 'x' to clear"); 
 
 }
 
@@ -89,6 +88,10 @@ void sendbit(int b) {
 
 void sendbyte(uint8_t b) {
 
+  //Serial.print("XMIT:");
+  //Serial.print(b,HEX);
+  //Serial.println("");
+
   int bitmask=0b10000000;
 
   while (bitmask) {
@@ -103,30 +106,172 @@ void sendbyte(uint8_t b) {
    
   }
 
+      
+
 }
+
+void sendpacket( uint16_t channel  , uint8_t band, uint8_t deemphassis , uint8_t spacing ) {
+
+  uint16_t crc = 0x0000;
+
+  sendbyte( channel >> 8 );
+  
+  crc = _crc16_update(crc, channel>>8 );   
+            
+  sendbyte( channel & 0xff );
+  crc = _crc16_update(crc, channel & 0xff );    
+
+  /*
+
+  sendbyte( band );
+  crc = _crc16_update(crc, band );    
+
+  sendbyte( deemphassis );
+  crc = _crc16_update(crc, deemphassis );    
+
+  sendbyte( spacing );
+  crc = _crc16_update(crc, spacing );    
+
+  */
+
+  sendbyte( crc >> 8 );
+  sendbyte( crc & 0xff );
+      
+}
+
+void sendprogramming( float station  , uint8_t band, uint8_t deemphassis , uint8_t spacing ) {
+
+  const float base[]  = { 87.5, 76, 76};            // Base freqenecy based on band
+  const float step[] = {  0.20 , 0.10 , 0.05 };     // Freqnecy step based on spacing
+
+  Serial.print(" computed channel=");
+
+  uint16_t channel  = (uint16_t) ((station - base[band]) / step[ spacing] );
+
+  Serial.print( channel );
+  Serial.print( "..." );
+
+  sendpacket( channel , band, deemphassis , spacing ); 
+
+}
+
+int readLine(char *buffer , int size) {
+
+    int len=0;
+
+    while (1) {
+
+      if (Serial.available()) {
+  
+        int c = Serial.read(); 
+  
+        if (c=='\n') { 
+
+          //Serial.println("XXX");
+                    
+          buffer[len]=0x00; // Terminate string
+
+          return(0); 
+            
+        } else {
+  
+          if (isprint(c)) {
+  
+            if (len<size) {
+
+              Serial.print( (char) c);              
+    
+              buffer[len++] = c;
+              
+            }
+          }
+        }        
+      }
+    }
+}
+
+#define BUFFER_LEN 20
 
 void loop() {
 
   //delay(500);
 
+  float station=103.5;
+  uint8_t band =0;
+  uint8_t deemphassis=0;
+  uint8_t spacing =0;
+  
+
   while (1) {
 
-    if (Serial.available()) {
+    Serial.println("TPR one-touch programmer");       
+    Serial.println("========================");
     
-      uint8_t led = Serial.parseInt();
-      //uint8_t led = ch - '0';    
+    Serial.print("S-Station    [");
+    Serial.print(station);
+    Serial.println("]");
 
-      sendbyte(led);
-      //sendbyte(led);
+    Serial.print("B-Band       [");
+    Serial.print(band);
+    Serial.println("]");
 
-      Serial.println( led );
-                
+    Serial.print("D-Deemphassis[");
+    Serial.print(deemphassis);
+    Serial.println("]");
+
+    Serial.print("P-sPacing    [");
+    Serial.print(spacing);
+    Serial.println("]");
+
+
+    Serial.println("");
+    Serial.println("ENTER-Program it!");
+    
+    char buffer[BUFFER_LEN];
+
+    if (!readLine( buffer , BUFFER_LEN )){
+
+
+      Serial.println("");
+
+
+      switch (toupper(buffer[0])) {
+
+        case 0x00:
+
+          Serial.print("Programming...");
+          sendprogramming( station  , band, deemphassis , spacing );
+          Serial.println("done.");
+          break;
+          
+        case 'S':
+          station=String(buffer+1).toFloat();
+          Serial.println("Station set.");
+          break;
+
+        case 'B':
+          band=buffer[0]-'0';
+          Serial.println("Band set.");
+          break;
+
+        case 'D':
+          deemphassis=buffer[0]-'0';
+          Serial.println("Deemphassis set.");
+          break;
+
+        case 'P':
+          spacing=buffer[0]-'0';
+          Serial.println("Spacing set.");
+          break;
+
+
+       default:
+          Serial.print("Don't understand [");
+          Serial.print(buffer);         
+          Serial.println("]");
+          break;
+       
+      }
     }
-  
-    //pinMode(12,INPUT);  
-    //delay(2000);
-    
-
-    
   }
 }

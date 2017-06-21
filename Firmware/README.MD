@@ -75,6 +75,17 @@ Note that if you advance the station with short presses and do not save with a l
 
 To load the station programmed when the unit initially shipped to the user, press and hold the button during power-up. The unit will indicate that it is ready to load the initial config 2 short flashes on the LED. To save this initial station to the EEPROM, release the button.
 
+## One touch programming feedback
+
+You can update the factory configuration by sending a packet though the battery terminals. More information in the on-touch-programming folder. This is meant to be done at the factory.
+
+When the unit receives a programming packet, it verifies the checksum.
+ 
+* If no errors, the new config is saved in EEPROM as both WORKING and FACTORY configs and the LED make two quick flashes. 
+* If the check fails, the packet is ignored and the LED makes one quick flash.
+
+  
+
 ## Theory of operation
 
 The ATTINY boots and...

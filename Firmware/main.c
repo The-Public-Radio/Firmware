@@ -183,7 +183,7 @@ typedef enum {
 	REGISTER_15 = 10,
 } si4702_register;
 
-#define EEPROM_BAND		((const uint8_t *)0)
+#define EEPROM_BAND		    ((const uint8_t *)0)
 #define EEPROM_DEEMPHASIS	((const uint8_t *)1)
 #define EEPROM_SPACING		((const uint8_t *)2)
 #define EEPROM_CHANNEL		((const uint16_t *)3)
@@ -372,7 +372,49 @@ void update_channel(uint16_t channel)
 	}
 
 	eeprom_write_word((uint16_t *)EEPROM_CRC16, crc);
+    
 }
+
+
+
+/*
+ * Set initial factory config. This becomes both the the active config and the config people will get when they do a factory reset. 
+ */
+
+void update_facotry_config(uint16_t channel , uint8_t band, uint8_t deemphassis , uint8_t spacing )
+{
+	uint16_t crc = 0x0000;
+	
+
+	eeprom_write_word((uint16_t *)EEPROM_CHANNEL,    channel);
+	eeprom_write_byte((uint8_t *)EEPROM_BAND,       band);
+	eeprom_write_byte((uint8_t *)EEPROM_DEEMPHASIS, deemphassis);
+	eeprom_write_byte((uint8_t *)EEPROM_SPACING,    spacing);
+
+	/*
+	 * Spin through the working params, up to but not including the CRC
+	 * calculating the new CRC and write that.
+	 */
+	for (const uint8_t *src = EEPROM_WORKING; src < (const uint8_t *)EEPROM_CRC16; src++) {
+		crc = _crc16_update(crc, eeprom_read_byte(src));
+	}
+
+	eeprom_write_word((uint16_t *)EEPROM_CRC16, crc);
+    
+    
+    // Now copy to factory default EEPROM
+    
+    const uint8_t *src= EEPROM_WORKING;
+	uint8_t *dest = (uint8_t *)(EEPROM_FACTORY);
+	uint8_t i;
+
+	for (i = 0; i < sizeof(last_resort_param); i++, src++, dest++) {
+		eeprom_write_byte(dest, eeprom_read_byte(src));
+	}
+    
+    
+}
+
 
 /*
  * check_param_crc() -	Check EEPROM_PARAM_SIZE bytes starting at *base,
@@ -788,10 +830,96 @@ void handleButtonDown(void) {
 
 
 
+// Attempt to read a programming packet, act on any valid ones received
+
+int readProgrammingPacket(void) {
+        
+    uint16_t crc = 0x0000;
+            
+    int d;
+           
+    d = readPbyte();    
+    if (d<0) return(d); // Check for error    
+    crc = _crc16_update(crc, d );    
+    
+    uint16_t channel = d << 8;                 // Byte 1: channel high byte
+    
+    d = readPbyte();    
+    if (d<0) return(d); // Check for error    
+    crc = _crc16_update(crc, d );    
+    
+    channel |= d;                              // Byte 2: channel low byte    
+
+/*
+        
+    d = readPbyte();    
+    if (d<0) return(d); // Check for error    
+    crc = _crc16_update(crc, d );    
+    
+    uint8_t band = d;
+    
+    d = readPbyte();    
+    if (d<0) return(d); // Check for error    
+    crc = _crc16_update(crc, d );    
+    
+    uint8_t deemphasis = d;
+    
+
+
+    d = readPbyte();    
+    if (d<0) return(d); // Check for error    
+    crc = _crc16_update(crc, d );    
+    
+    uint8_t spacing = d;
+
+*/
+    
+    // Calculate the crc check
+  
+    uint16_t crc_rec = 0x0000;              // crc received in packet
+    
+           
+    d = readPbyte();    
+    if (d<0) return(d); // Check for error    
+    crc_rec = d << 8;                       // Byte 3: received crc high byte
+
+    d = readPbyte();    
+    if (d<0) return(d); // Check for error    
+    crc_rec |= d;                           // Byte 4: received crc low byte
+    
+    if ( crc != crc_rec ) {                 // Compared received crc to calculated crc
+        
+        debugBlink(1);                      // Three short blinks = bad crc
+        return(-1); 
+        
+    }        
+    
+    
+    // TODO: Is this necessary?
+    
+    _delay_ms(50);      // Let capacitor charge up a bit
+    
+    //update_channel( channel );    
+    //update_facotry_config(channel , band, deemphasis , spacing );
+    
+    update_facotry_config(channel , 0, 0 , 0 );
+        
+    if (eeprom_read_word(EEPROM_CHANNEL)==channel) {
+        
+        debugBlink(2);
+        
+    }        else {
+        
+    debugBlink(3);                          // two short blinks = programming accepted
+    }    
+    return(0); 
+                    
+}    
+
+
 int main(void)
 {
-	//PORTB |= 0x08;	/* Enable pull up on PB3 for Button */ 
-
+    
     // Set up the reset line to the FM_IC and AMP first so they are quiet. 
     // This eliminates the need for the external pull-down on this line. 
     
@@ -854,27 +982,8 @@ int main(void)
         // DDRB |= _BV(0);     // Show the search window for testing
         
         while (1) {
-            
-            int r1;
-
-            
-            // Try to read in two bytes from the programmer. 
-            // This will timeout and fail if we wait longer then 40ms
-            // in which case we will start listening again for next transmit
-                        
-            r1=readPbyte();
-            
-            if (r1>=0) {
-                
-                if (r1==77) { 
-                    debugBlink( 2 );
-                } else {
-                    debugBlink( 3 );
-                }                                        
-                
-                
-            }                                
-                   
+                                        
+                readProgrammingPacket();                   
             
         }
         
