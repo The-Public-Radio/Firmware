@@ -311,7 +311,7 @@ static inline void set_shadow_reg(si4702_register reg, uint16_t value)
 
 void si4702_read_registers(void)
 {
-	USI_TWI_Start_Transceiver_With_Data(0x21, shadow, 32);
+    USI_TWI_Read_Data( FMIC_ADDRESS , shadow , 0x10 * 2 );      // Total of 16 registers, each 2 bytes
 }
 
 /*
@@ -328,8 +328,7 @@ void si4702_write_registers(void)
     // The previous version of this software blindly wrote 0's and that seems to work fine. 
     
     
-    USI_TWI_Start_Transceiver_With_Data(0x20, &(shadow[REGISTER_02]), (0x08 - 0x02) * 2);    
-    //USI_TWI_Write_Data( FMIC_ADDRESS ,  &(shadow[REGISTER_02]) , (0x08 - 0x02) * 2 );
+    USI_TWI_Write_Data( FMIC_ADDRESS ,  &(shadow[REGISTER_02]) , (0x08 - 0x02) * 2 );
 }
 
 /*
