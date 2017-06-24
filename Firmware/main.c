@@ -318,32 +318,78 @@ void si4702_read_registers(void)
  * Just write registers 2 thru 7 inclusive from the shadow array.
  */
 
-void si4702_write_registers(void)
+// Writes registers starting at 0x02 up to and including the specified upto_reg (max 0x09) 
+// No reason to overwrite registers that we have not changed - especially 0x07 which has conflicting
+// documentation about what to write there after powerup. Better to leave it be!
+
+void si4702_write_registers(unsigned upto_reg)
 {
 	//USI_TWI_Start_Transceiver_With_Data(0x20, &(shadow[REGISTER_02]), 12);
         
     // Only registers 0x02 - 0x07 are relevant for config, and each register is 2 bytes wide
     
-    // Even though the datasheet says that the reserved bits of 0x07 must be Read before writing, 
-    // The previous version of this software blindly wrote 0's and that seems to work fine. 
-    
-    
-    USI_TWI_Write_Data( FMIC_ADDRESS ,  &(shadow[REGISTER_02]) , (0x08 - 0x02) * 2 );
+    USI_TWI_Write_Data( FMIC_ADDRESS ,  &(shadow[REGISTER_02]) , ( upto_reg - REGISTER_02 + 2) );
 }
+
+
+// Blink a byte out pin 2 (normally button)
+
+void debugBlinkByte( uint8_t data ) {
+
+    CBI( PORTB , PB3 );    // TODO: TESTING
+    SBI( DDRB , PB3 );// TODO: TESTING
+    
+    _delay_us(500);
+
+    for( uint8_t bitMask=0b10000000; bitMask !=0; bitMask>>=1 ) {
+
+        SBI( PORTB , PB3 );    // TODO: TESTING
+        _delay_us(50);
+        CBI( PORTB , PB3 );     // TODO: TESTING
+        _delay_us(50);
+        
+        // setup data bit
+                        
+        if ( data & bitMask) {
+            SBI( PORTB , PB3 );    // TODO: TESTING
+        } else {
+            CBI( PORTB , PB3 );     // TODO: TESTING
+            
+        }     
+        
+        _delay_us(900);           
+        
+   }
+    CBI( DDRB , PB3 );// TODO: TESTING
+    SBI( PORTB , PB3 );// TODO: TESTING
+    
+}    
+
 
 /*
  * tune_direct() -	Directly tune to the specified channel.
  */
 void tune_direct(uint16_t chan)
 {
+
+    debugBlinkByte( chan / 0xff ); //TODO:TESTING    
+    debugBlinkByte( chan & 0xff); //TODO:TESTING    
 	set_shadow_reg(REGISTER_03, 0x8000 | (chan & 0x01ff));
 
-	si4702_write_registers();
+	si4702_write_registers( REGISTER_03 );
 
 	_delay_ms(160);
 
+
+    /*
+        The tune operation begins when the TUNE bit is set high. The STC bit is set high
+        when the tune operation completes. The STC bit must be set low by setting the TUNE
+        bit low before the next tune or seek may begin.
+    */
+
+    // Clear the tune bit here so chip will be ready to tune again if user presses the button.
 	set_shadow_reg(REGISTER_03, get_shadow_reg(REGISTER_03) & ~0x8000);
-	si4702_write_registers();
+	si4702_write_registers( REGISTER_03 );
 }
 
 uint16_t currentChanFromShadow(void) {
@@ -512,7 +558,7 @@ void debugshortblink(void) {
 }    
 
 
-void binaryDebugBlink( uint16_t b ) {
+void binaryDebugBlink( uint8_t b ) {
     
     while (1) {
          
@@ -534,6 +580,13 @@ void binaryDebugBlink( uint16_t b ) {
             
     }        
 }    
+
+
+#define REG_02_DSMUTE_BIT   15          // Softmute enable
+#define REG_02_DMUTE_BIT    14          // Mute disable
+#define REG_02_MONO_BIT     13          // Mono select
+#define REG_02_ENABLE_BIT    1          // Powerup enable
+
 
 void si4702_init(void)
 {
@@ -576,7 +629,6 @@ void si4702_init(void)
     // Enable the pull-ups on the TWI lines
 
 	USI_TWI_Master_Initialise();
-
 	
     // Reg 0x07 bit 15 - Crystal Oscillator Enable.
     // 0 = Disable (default).
@@ -588,7 +640,7 @@ void si4702_init(void)
 
 	set_shadow_reg(REGISTER_07, 0x8100);
 
-	si4702_write_registers();
+	si4702_write_registers(REGISTER_07);
 
     /*
 
@@ -607,11 +659,14 @@ void si4702_init(void)
 	 *	- Mono
 	 *	- Wrap on band edges during seek
 	 *	- Seek up
+     *  - ENABLE (this actually brings the chip up)
 	 */
         
-	set_shadow_reg(REGISTER_02, 0xE201);
+	//set_shadow_reg(REGISTER_02, 0xE201);
+    
+    set_shadow_reg(REGISTER_02, _BV(REG_02_DSMUTE_BIT) | _BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );
 
-	si4702_write_registers();
+	si4702_write_registers( REGISTER_02 );
     
     /*    
         Software should wait for the powerup
@@ -625,17 +680,38 @@ void si4702_init(void)
           
     */    
 
+	//_delay_ms(110);
 	_delay_ms(110);
+    
+    //set_shadow_reg(REGISTER_02, _BV(REG_02_DSMUTE_BIT) | _BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );
+    
+    
+    /* 
+
+        Bits 13:0 of register 07h
+        must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
+        Refer to Si4702/03 Internal Crystal Oscillator Errata.
+            
+    */
+
+    //We just ENABLED, so here we set the oscilator shadow register to the mandatory value 
+    //so it will have the correct value on each write from now on. 
+
+        
+	//set_shadow_reg(REGISTER_07, 0x8000 | 0x3c04 );
+    
 
 	/*
-	 * Set deemphasis based on eeprom.
+	 * Set radio params based on eeprom...
 	 */
     
 	set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
 
 	set_shadow_reg(REGISTER_05,
 			(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
-			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4));
+			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4) |
+            (((uint16_t)(eeprom_read_byte(EEPROM_VOLUME) & 0x0f)))           
+    );
 
 
 	/*
@@ -646,20 +722,24 @@ void si4702_init(void)
      * TODO: Find out what is changed on this read and hardcode it so we can dump the whole read function.
 	 */
     
-	si4702_read_registers();
-	set_shadow_reg(REGISTER_03, 0x0000);
-	si4702_write_registers();
+	//si4702_read_registers();
+	//set_shadow_reg(REGISTER_03, 0x0000);
+	si4702_write_registers( REGISTER_05 );
 
-	tune_direct(eeprom_read_word(EEPROM_CHANNEL));
+	//tune_direct(eeprom_read_word(EEPROM_CHANNEL)); // TODO:TESTING
+	tune_direct(0x0040); // TODO:TESTING z100
+    
+    while (1);
+    
     //set_shadow_reg(REGISTER_03, 0x8050 );                   //for testing, frequency = 103.5 MHz = 0.200 MHz x 80 + 87.5 MHz). Write data 8050h.
 
 
     // Pump up the volume
 
-	set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
-				(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
+	//set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
+	//			(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
 
-	si4702_write_registers();
+	//si4702_write_registers();
     
     /*
     
