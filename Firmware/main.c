@@ -139,7 +139,6 @@
 #include <util/delay.h>
 
 
-
 #include "USI_TWI_Master.h"
 #include "VccADC.h"
 #include "VccProg.h"
@@ -158,7 +157,19 @@
 
 #define LOW_BATTERY_VOLTAGE (2.1)       // Below this, we will just blink LED and not turn on 
 
-#define BREATH_COUNT_TIMEOUT (60)       // How many initial breaths should we take before going to sleep? Each breath currently about 2 secs.
+#define BREATH_COUNT_TIMEOUT_S (60)       // How many initial breaths should we take before going to sleep? Each breath currently about 2 secs.
+
+// These are the error display codes
+// When we run into problems, we blink the LED this many times to show the user
+
+#define DIAGNOSTIC_BLINK_BADEEPROM     3            // EEPROM user settings failed CRC check on startup
+#define DIAGNOSTIC_BLINK_SAVEDCHAN     2            // Not an error, just feedback that the save succeeded
+#define DIAGNOSTIC_BLINK_LOWBATTERY    1            // Battery too low for operation
+#define DIAGNOSTIC_BLINK_NONE          0
+
+#define  DIAGNOSTIC_BLINK_TIMEOUT_S   120           // Show diagnostic blink at least this long before going to sleep
+                                                    // Give user time to see it, but don't go too long because we will
+                                                    // make crusty batteries
 
 #define SBI(port,bit) (port|=_BV(bit))
 #define CBI(port,bit) (port&=~_BV(bit))
@@ -190,21 +201,10 @@ typedef enum {
 #define EEPROM_VOLUME		((const uint8_t *)5)
 #define	EEPROM_CRC16		((const uint16_t *)14)
 
-#define EEPROM_PARAM_SIZE	(16)
+#define EEPROM_PARAM_BLOCK_SIZE	(16)
 
 #define	EEPROM_WORKING		((const uint8_t *)0)
 #define EEPROM_FACTORY		((const uint8_t *)16)
-
-const uint8_t last_resort_param[16] PROGMEM = {
-	0x00,
-	0x00,
-	0x00,
-	0x09, 0x00,
-	0x0f,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x6f, 0x6c,
-} ;
-
 
 
 /*
@@ -268,10 +268,30 @@ static inline void LED_PWM_off(void) {
     TCCR1 = 0;              // Stop counter
     GTCCR = 0x00;           // Disconnect OCR2B
         
+}  
+
+static uint8_t currentLEDBrightness=0;
+
+static void updateLEDcompensation(void) {
+
+    if (currentLEDBrightness>0) {
+        OCR1B = currentLEDBrightness;
+        // TODO: Do voltage adjust        
+    }    
 }    
 
+// 0=off, 255-brightest. Normalized for voltage.   
+
 static inline void setLEDBrightness( uint8_t b) {    
-    OCR1B = b;
+    currentLEDBrightness = b;
+    
+    if (b==0) {
+        LED_PWM_off();
+    } else {
+        updateLEDcompensation();
+        LED_PWM_on();
+    }        
+                
 }    
 
 // Breath data thanks to Lady Ada
@@ -296,12 +316,12 @@ uint8_t breath(uint8_t step) {
 
 uint8_t shadow[32];
 
-static inline uint16_t get_shadow_reg(si4702_register reg)
+static  uint16_t get_shadow_reg(si4702_register reg)
 {
 	return (shadow[reg] << 8) | (shadow[reg + 1]);
 }
 
-static inline void set_shadow_reg(si4702_register reg, uint16_t value)
+static  void set_shadow_reg(si4702_register reg, uint16_t value)
 {
 	shadow[reg] = value >> 8;
 	shadow[reg + 1] = value & 0xff;
@@ -368,18 +388,15 @@ void debugBlinkByte( uint8_t data ) {
 
 /*
  * tune_direct() -	Directly tune to the specified channel.
+ * Assumes chan < 0x01ff
  */
 void tune_direct(uint16_t chan)
 {
 
-    debugBlinkByte( chan / 0xff ); //TODO:TESTING    
-    debugBlinkByte( chan & 0xff); //TODO:TESTING    
-	set_shadow_reg(REGISTER_03, 0x8000 | (chan & 0x01ff));
+	set_shadow_reg(REGISTER_03, 0x8000 | 0x01ff);
 
 	si4702_write_registers( REGISTER_03 );
-
 	_delay_ms(160);
-
 
     /*
         The tune operation begins when the TUNE bit is set high. The STC bit is set high
@@ -388,7 +405,7 @@ void tune_direct(uint16_t chan)
     */
 
     // Clear the tune bit here so chip will be ready to tune again if user presses the button.
-	set_shadow_reg(REGISTER_03, get_shadow_reg(REGISTER_03) & ~0x8000);
+	set_shadow_reg(REGISTER_03,  chan );
 	si4702_write_registers( REGISTER_03 );
 }
 
@@ -421,59 +438,19 @@ void update_channel(uint16_t channel)
 }
 
 
-
-/*
- * Set initial factory config. This becomes both the the active config and the config people will get when they do a factory reset. 
- */
-
-void update_facotry_config(uint16_t channel , uint8_t band, uint8_t deemphassis , uint8_t spacing )
-{
-	uint16_t crc = 0x0000;
-	
-
-	eeprom_write_word((uint16_t *)EEPROM_CHANNEL,    channel);
-	eeprom_write_byte((uint8_t *)EEPROM_BAND,       band);
-	eeprom_write_byte((uint8_t *)EEPROM_DEEMPHASIS, deemphassis);
-	eeprom_write_byte((uint8_t *)EEPROM_SPACING,    spacing);
-
-	/*
-	 * Spin through the working params, up to but not including the CRC
-	 * calculating the new CRC and write that.
-	 */
-	for (const uint8_t *src = EEPROM_WORKING; src < (const uint8_t *)EEPROM_CRC16; src++) {
-		crc = _crc16_update(crc, eeprom_read_byte(src));
-	}
-
-	eeprom_write_word((uint16_t *)EEPROM_CRC16, crc);
-    
-    /*
-    // Now copy to factory default EEPROM
-    
-    const uint8_t *src= EEPROM_WORKING;
-	uint8_t *dest = (uint8_t *)(EEPROM_FACTORY);
-	uint8_t i;
-
-	for (i = 0; i < sizeof(last_resort_param); i++, src++, dest++) {
-		eeprom_write_byte(dest, eeprom_read_byte(src));
-	}
-    
-    */
-    
-}
-
-
 /*
  * check_param_crc() -	Check EEPROM_PARAM_SIZE bytes starting at *base,
  *			and return whether the crc (last 2 bytes) is correct
  *			or not.
  *			Return 0 if crc is good, !0 otherwise.
  */
+
 static uint16_t check_param_crc(const uint8_t *base)
 {
 	uint16_t crc = 0x0000;
 	uint8_t i;
 
-	for (i = 0; i < EEPROM_PARAM_SIZE; i++, base++) {
+	for (i = 0; i < EEPROM_PARAM_BLOCK_SIZE; i++, base++) {
 		crc = _crc16_update(crc, eeprom_read_byte(base));
 	}
 
@@ -484,57 +461,37 @@ static uint16_t check_param_crc(const uint8_t *base)
 }
 
 /*
- * init_factory_param() -	Re-init the factory default area, using the
- *				16 bytes from last_resort_param[]. This really
- *				is, as the name suggests, the last resort.
- */
-static void init_factory_param(void)
-{
-	uint8_t *dest = (uint8_t *)(EEPROM_FACTORY);
-	uint8_t i;
-
-	for (i = 0; i < sizeof(last_resort_param); i++, dest++) {
-		eeprom_write_byte(dest, pgm_read_byte(&(last_resort_param[i])));
-	}
-}
-
-/*
  * copy_factory_param() -	Copy the factory default parameters into the
  *				working param area  simple bulk copy of the
  *				entire 16 bytes. No check of the crc.
  */
+
 static void  copy_factory_param(void)
 {
 	const uint8_t *src = EEPROM_FACTORY;
 	uint8_t *dest = (uint8_t *)(EEPROM_WORKING);
 	uint8_t i;
 
-	for (i = 0; i < sizeof(last_resort_param); i++, src++, dest++) {
+	for (i = 0; i < EEPROM_PARAM_BLOCK_SIZE; i++, src++, dest++) {
 		eeprom_write_byte(dest, eeprom_read_byte(src));
 	}
 }
 
-/*
- * check_eeprom() -	Check the CRC for the operational parameters in eeprom.
- *			If the CRC fails, check the factory parameters CRC.
- *			If that is good, copy into the operational area, if not
- *			good, then just pick some suitable defaults and write
- *			the same to both factory and operational areas.
- *
- *			The idea being that by the time this function returns,
- *			the eeprom has valid data in it that passes CRC.
- */
 
-void check_eeprom(void)
-{
-	if (check_param_crc(EEPROM_WORKING)) {
-		if (check_param_crc(EEPROM_FACTORY)) {
-			init_factory_param();
-		}
-		copy_factory_param();
-	}
-}
+// Show the user something went wrong and we are shutting down.
+// Blink the LED _count_ times every second.
+// Continue doing this for at least DIAGNOSTIC_BLINK_SECONDS
+// then deep sleep forever
+//
+// Adjusts LED brightness based on Vcc voltage
+// Assumes Timer is running to PWM the LED
 
+void shutDown(uint8_t blinkCount) {
+    
+    
+        // Shutdown the amp and FM_IC chips by holding them in reset
+        // TODO: Add a MOSFET so we can completely shut them off (they still pull about 25uA in reset)
+}    
 
 void debugBlink( uint8_t b ) {
     
@@ -652,19 +609,17 @@ void si4702_init(void)
 
 	_delay_ms(600);
 
-	/*
-	 * Register 02 default settings:
-	 *	- Softmute enable
-	 *	- Mute enable
-	 *	- Mono
-	 *	- Wrap on band edges during seek
-	 *	- Seek up
-     *  - ENABLE (this actually brings the chip up)
-	 */
+    /*    
+        Set the ENABLE bit high and the DISABLE bit low to
+        powerup the device.    
         
-	//set_shadow_reg(REGISTER_02, 0xE201);
-    
-    set_shadow_reg(REGISTER_02, _BV(REG_02_DSMUTE_BIT) | _BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );
+    */
+           
+    // Note that if we unmute here, we get a "click" before the radio tunes 
+            
+    set_shadow_reg(REGISTER_02, _BV(REG_02_ENABLE_BIT) );
+
+    //set_shadow_reg(REGISTER_02,   (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );
 
 	si4702_write_registers( REGISTER_02 );
     
@@ -680,25 +635,7 @@ void si4702_init(void)
           
     */    
 
-	//_delay_ms(110);
 	_delay_ms(110);
-    
-    //set_shadow_reg(REGISTER_02, _BV(REG_02_DSMUTE_BIT) | _BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );
-    
-    
-    /* 
-
-        Bits 13:0 of register 07h
-        must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
-        Refer to Si4702/03 Internal Crystal Oscillator Errata.
-            
-    */
-
-    //We just ENABLED, so here we set the oscilator shadow register to the mandatory value 
-    //so it will have the correct value on each write from now on. 
-
-        
-	//set_shadow_reg(REGISTER_07, 0x8000 | 0x3c04 );
     
 
 	/*
@@ -714,52 +651,58 @@ void si4702_init(void)
     );
 
 
-	/*
-	 * It looks like the radio tunes to <something> once enabled.
-	 * Make sure the STC bit is cleared by clearing the TUNE bit.
-     *
-     * JML - The clearing of TUNE bit does not seem to be nessisary, but the read_regs() is. Go figure, something must change somewhere.
-     * TODO: Find out what is changed on this read and hardcode it so we can dump the whole read function.
-	 */
+    // If we Unmute here, then you hear a blip of music before a click. Arg. 
+
+    // Note that this write looks like it must come before the tune.
+    // If we try to batch them into one write then we get no audio. Hmmm. 
     
-	//si4702_read_registers();
-	//set_shadow_reg(REGISTER_03, 0x0000);
 	si4702_write_registers( REGISTER_05 );
-
-	//tune_direct(eeprom_read_word(EEPROM_CHANNEL)); // TODO:TESTING
-	tune_direct(0x0040); // TODO:TESTING z100
     
-    while (1);
     
-    //set_shadow_reg(REGISTER_03, 0x8050 );                   //for testing, frequency = 103.5 MHz = 0.200 MHz x 80 + 87.5 MHz). Write data 8050h.
-
-
-    // Pump up the volume
-
-	//set_shadow_reg(REGISTER_05, (get_shadow_reg(REGISTER_05) & ~0x000f) |
-	//			(eeprom_read_byte(EEPROM_VOLUME) & 0x0f));
-
-	//si4702_write_registers();
+    uint16_t chan = eeprom_read_word(EEPROM_CHANNEL);       // Assumes this does not have bit 15 set. 
     
-    /*
+    //uint16_t chan = 0x0040;                                   // test with z100.
+    //uint16_t chan = 0x0044;                                  // Test with  - cbs 101 fm
     
-    Can you here the de-emphasis difference? I don't think so. 
+    debugBlinkByte( chan / 0x100 );
     
-    while (1) {
+    debugBlinkByte( chan & 0xff );
+    
+	set_shadow_reg(REGISTER_03, 0x8000 |  chan );
 
-	    set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | 0x0800 );
-        SBI( PORTB , LED_DRIVE_BIT );
-        si4702_write_registers();
-        _delay_ms(1000);
-	    set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) & ~0x0800 );
-        CBI( PORTB , LED_DRIVE_BIT );
-        si4702_write_registers();        
-        _delay_ms(1000);
+	si4702_write_registers( REGISTER_03 );
+
+
+    /*   
+        Seek/Tune Time8,11 SPACE[1:0] = 0x, RCLK
+        tolerance = 200 ppm, (x = 0 or 1)
+        60 ms/channel
         
-           
-    } 
+   */
     
-    */       
+    // THis appears to be where the click happens. 
+    // If this is 60ms, then we hear the station tune, then lick, then station again.
+    // More where needed here. 
+    
+    // Even though only 60ms spec'ed, if we don't wait for 100ms before unmute then we hear a a blink of music before the pop. Arg. 
+    _delay_ms(100);
+    
+    // We should be all tuned up and ready to go when we get here, so setup auto and unmute and let the music play!
+    set_shadow_reg(REGISTER_02,  _BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );  
+    
+
+    /*
+        The tune operation begins when the TUNE bit is set high. The STC bit is set high
+        when the tune operation completes. The STC bit must be set low by setting the TUNE
+        bit low before the next tune or seek may begin.
+    */
+
+    // Clear the tune bit here so chip will be ready to tune again if user presses the button.
+	set_shadow_reg(REGISTER_03,  chan );
+	
+	si4702_write_registers( REGISTER_03 );
+    
+    
 }
 
 
@@ -786,9 +729,9 @@ void debug_fastblink(void) {
 }    
 
 
-// Goto bed, will only wake up on button press interrupt (if enabled)
+// Goto bed, will only wake up on button press interrupt (if enabled) or WDT
 
-void deepSleep(void) {    
+static void deepSleep(void) {    
 	set_sleep_mode( SLEEP_MODE_PWR_DOWN );
     sleep_enable();
     sleep_cpu();        // Good night    
@@ -804,7 +747,7 @@ static inline uint8_t buttonDown(void) {
 // Setup pin change interrupt on button 
 // returns true of the button was down on entry
 
-uint8_t initButton(void) 
+static uint8_t initButton(void) 
 {
  
      SBI( PORTB , BUTTON_INPUT_BIT);              // Enable pull up on button 
@@ -853,7 +796,7 @@ ISR( PCINT0_vect )
 // Always waits for the debounced up before returning
 
 
-void handleButtonDown(void) {
+static void handleButtonDown(void) {
     
     setLEDBrightness(0);            // Led off when button goes down. Gives feedback if we are currently breathing otherwise benign
     
@@ -875,6 +818,7 @@ void handleButtonDown(void) {
         currentChan++;
             
         // Input Frequency fRF 76 — 108 MHz
+        // TODO: Adjust for band
             
         if (currentChan > (1080-760) ) {        // Wrap at top of band back down to bottom
                 
@@ -912,7 +856,7 @@ void handleButtonDown(void) {
 
 // Attempt to read a programming packet, act on any valid ones received
 
-int readProgrammingPacket(void) {
+static int readProgrammingPacket(void) {
         
     uint16_t crc = 0x0000;
             
@@ -979,10 +923,7 @@ int readProgrammingPacket(void) {
     
     _delay_ms(50);      // Let capacitor charge up a bit
     
-    //update_channel( channel );    
-    //update_facotry_config(channel , band, deemphasis , spacing );
-    
-    update_facotry_config(channel , 0, 0 , 0 );
+    update_channel( channel );    
                 
     debugBlink(2);          // two short blinks = programming accepted
     
@@ -996,8 +937,7 @@ int main(void)
     
     // Set up the reset line to the FM_IC and AMP first so they are quiet. 
     // This eliminates the need for the external pull-down on this line. 
-    
-    
+        
     SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, makes them sleep            
         
     // TODO: Enable DDR on LED pin but for now just use pull-up
@@ -1075,9 +1015,6 @@ int main(void)
 
     // Normal operation from here (good battery voltage, not connected to a programmer)
     
-           
-	check_eeprom();
-    
     
     LED_PWM_init();          // Make it so we can pwm the LED for now on...
     
@@ -1112,13 +1049,31 @@ int main(void)
                         
     }   
     
+    
+    // Now lets check if the user EEPROM settings are corrupted
+    // We do this *after* the factory reset test, see why?
+    
+    if (!check_param_crc( EEPROM_WORKING )) {
+        
+        // Must be inside a nuclear power reactor...
+        
+        // Tell user we are in trouble and then go to sleep
+        // This is nice because at least we get some feedback that EEPROMS are corrupting.
+        // Do not try to rewrite EEPROM settings, let the user do that manually with a factory reset
+        
+        shutDown( DIAGNOSTIC_BLINK_BADEEPROM );
+        
+    }        
+    
+    
+    
 	si4702_init();
     // Radio is now on and tuned
 
              
     // Breathe for a while so user knows we are alive in case not tuned to a good station or volume too low
 
-    uint8_t countdown_s = BREATH_COUNT_TIMEOUT;
+    uint8_t countdown_s = BREATH_COUNT_TIMEOUT_S;
     
     while (countdown_s) {
         
@@ -1147,7 +1102,13 @@ int main(void)
     
     while (1) {
         
-        // Any button state change will wake us up
+        
+        // Wake on...
+        //      any button state change (but ignore any but down)
+        //      periodic WDT
+
+
+        LED_PWM_off();      // Don't waste power on the timer when we are not using the LED
         
         deepSleep();
         
@@ -1157,7 +1118,6 @@ int main(void)
             
             handleButtonDown();     // Always wait for the debounced up before returning
             
-            LED_PWM_off();
             
         }            
         
