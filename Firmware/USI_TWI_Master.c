@@ -35,7 +35,7 @@
 #include "USI_TWI_Master.h"
 #include <util/delay.h>
 
-#define BIT_TIME_US     (1000)          // How long should should we wait between bit transitions?
+#define BIT_TIME_US     (5)          // How long should should we wait between bit transitions?
 
 #define SBI(port,bit) (port|=_BV(bit))
 #define CBI(port,bit) (port&=~_BV(bit))
@@ -90,6 +90,8 @@ void USI_TWI_Master_Initialise( void )
 
 static unsigned char USI_TWI_Write_Byte( unsigned char data ) {
     
+    
+    
     for( uint8_t bitMask=0b10000000; bitMask !=0; bitMask>>=1 ) {
         
         // setup data bit
@@ -98,6 +100,7 @@ static unsigned char USI_TWI_Write_Byte( unsigned char data ) {
             sda_pull_high();
         } else {
             sda_drive_low();
+            
         }                
         
         // clock it out        
@@ -216,15 +219,17 @@ static unsigned char USI_TWI_Start( unsigned char addr , unsigned char readFlag)
         
 }    
 
+
 // Write the bytes pointed to by buffer
 // addr is the chip bus address
 // assumes bus is idle on entry, Exists with bus idle
 // Returns 0 on success
 
-unsigned char USI_TWI_Write_Data(unsigned char addr, uint8_t *buffer , uint8_t count)
+unsigned char USI_TWI_Write_Data(unsigned char addr, const uint8_t *buffer , uint8_t count)
 {
-    
+        
     USI_TWI_Start( addr , 0 );      // TODO: check for error
+    
     
     while (count--) {
         
@@ -251,6 +256,8 @@ unsigned char USI_TWI_Write_Data(unsigned char addr, uint8_t *buffer , uint8_t c
     return(0);
     
 }
+
+/*
 
 // Fill data buffer with bytes read from TWI
 // addr is the chip bus address
@@ -289,7 +296,7 @@ unsigned char USI_TWI_Read_Data(unsigned char addr, uint8_t *buffer , uint8_t co
     
 }
 
-
+*/
 // TODO: delete this placeholder
 
 /*
