@@ -1,22 +1,24 @@
 # PR_Public_Radio
-Created 2013.12.17
-by Spencer Wright
 
-Updated by Spencer Wright 2015.01.21
+The single channel radio for your daily routine.
+![](masthead.jpg)
+
+More info at...
+http://www.thepublicrad.io/
 
 ## Included 
 
-### Firmware
+### [Firmware](/firmware)
 
 The code that runs in the ATTINY25/45/85 on the TPR circuit board. 
 
 Compiled with either Atmel Studio 7 or AVR GCC tool chain. 
 
-### One-touch-programming jig
+### [One-touch-programming jig](One-touch_Programming_Jig)
 
 An Arduino sketch that can program a TPR's user parameters though the battery clips on a production jig. 
 
-### EEPROM Utilites
+### [EEPROM Utilites](EEPROM Utilities)
 
 Sundry Python and shell scrip code for messing with the config data stored in a TPR's EEPROM.  
 
