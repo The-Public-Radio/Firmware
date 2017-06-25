@@ -1,14 +1,14 @@
 # PR_Public_Radio
 
 The single channel radio for your daily routine.
-![](masthead.jpg)
+![](masthead.jpg?raw=true "The Public Radio")
 
 More info at...
 http://www.thepublicrad.io/
 
 ## Included 
 
-### [Firmware](/firmware)
+### [Firmware](/Firmware)
 
 The code that runs in the ATTINY25/45/85 on the TPR circuit board. 
 
@@ -18,7 +18,7 @@ Compiled with either Atmel Studio 7 or AVR GCC tool chain.
 
 An Arduino sketch that can program a TPR's user parameters though the battery clips on a production jig. 
 
-### [EEPROM Utilites](EEPROM Utilities)
+### [EEPROM%20Utilites](EEPROM Utilities)
 
 Sundry Python and shell scrip code for messing with the config data stored in a TPR's EEPROM.  
 
