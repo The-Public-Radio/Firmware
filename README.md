@@ -22,7 +22,7 @@ Compiled with either Atmel Studio 7 or AVR GCC tool chain.
 
 An Arduino sketch that can program a TPR's user parameters though the battery clips on a production jig. 
 
-### [EEPROM%20Utilities](EEPROM Utilities) 
+### [EEPROM Utilities](EEPROM%20Utilities) 
 
 Sundry Python and shell scrip code for messing with the config data stored in a TPR's EEPROM.  
 
