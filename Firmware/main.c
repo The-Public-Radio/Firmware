@@ -203,7 +203,9 @@ typedef enum {
 
 #define EEPROM_PARAM_BLOCK_SIZE	(16)
 
-#define	EEPROM_WORKING		((const uint8_t *)0)
+// Starting address of parameter blocks in EEPROM. Can't overlap and must match with other tools that make EEPROM images
+
+#define	EEPROM_WORKING		((const uint8_t *) 0)
 #define EEPROM_FACTORY		((const uint8_t *)16)
 
 
@@ -211,6 +213,7 @@ typedef enum {
  * Setup Timer 1 to drive the LED using PWM on the OC1B pin (PB4)
  */
 
+// Assumes timer registers are still at reset-default values.
 
 static inline void LED_PWM_init(void)
 {
@@ -218,40 +221,50 @@ static inline void LED_PWM_init(void)
     // We are using simple PWM mode to drive OCR1B which is connected to the LED.
     // We are driving off the system clock, not the PLL
     // We are using non-inverting mode where OCR is set at 0 and cleared at match, so lower matches are less brightness
+    // Note that if OCR is 0, then there i not pulse geenrated so LED stays off
     
     
     // We are going to run PWM mode
     
     
 	OCR1C = 255;                //  In PWM mode, the Timer counter counts up to the value specified in the output compare register OCR1C and starts again from $00. 
-	OCR1B = 0;
     
+    // OCR1B=0 here because it is the default startup value
+    
+    GTCCR =     
+        _BV( PWM1B  ) |          // Enable PWM module B
+        _BV( COM1B1 )            // OC1x cleared on compare match. Set when TCNT1 = $00.
+    ;
+    
+    
+	//TCCR1 = _BV( CS12 );        // Enable timer, PCK/8           
+            
 }
 
+
+// Enter with OCR1B already set to desired duty cycle
 
 static inline void LED_PWM_on(void) {
 
     
     // We could have saved a write here if the LED was attached to OCR1A instead of B since we could have
     // disabled the output pin and stopped the timer in a single register
-        
-
-    TCNT1 = 0;          // Don't start in the middle or might get a random flash when we enable depdning on where this happened to end up.
-
+            
+    TCNT1 =254;                 // Next count will overflow and start a proper cycle based on OCR1B
+                                // If we do not do this, then the output gets set high when we enable the PWM! Undocumented!
+    
     GTCCR =     
         _BV( PWM1B  ) |          // Enable PWM module B
         _BV( COM1B1 ) |          // OC1x cleared on compare match. Set when TCNT1 = $00.
-        _BV( FOC1A )  |          // Force Output Compare Match 1A. Will set output since TCNT is 0 and we are in SET AT $0 mode. 
-        _BV( PSR1 )              // Mind as well get rid of any prescaller jitter too!
+        _BV( FOC1B )  |          // Force compare match. Because of the output mode bits, this will clear the output.    
+        _BV( PSR1 )              //  Prescaler Reset Timer/Counter1 - start with a clean slate on the precsaller too
     ;
-    
     
     // 1Mhz clock / 256 step cycle / 8 prescaller = 500hkz pwm rate
     // SHould be fast enough for driving LED without current limiting resistor
     
-    
-	TCCR1 = _BV( CS12 );        // Enable timer, PCK/8
-           
+      TCCR1 = _BV( CS12 );        // Enable timer, PCK/8           
+            
 }    
 
 
@@ -279,12 +292,12 @@ static inline void LED_PWM_off(void) {
     
     // So, if the OCR is set to 0, then the LED should be off no matter what...    
 
+    // Disable the PWM, disconnect the pin (will be driven by PORT which should be low)
 
-    GTCCR = 0;      // Disable the PWM, disconnect the pin (will be driven by PORT which should be low)
-    
-    TCCR1 = 0;      // Stop counter to save power
-    
-    
+    GTCCR = 0;                  // Disconnect output pin. 
+    TCCR1 = 0;                  // Stop the clock. Save some power.
+                
+    // Note that we don't bother to disable the clock when LED is off because it will stop in sleep shutdown mode anyway
         
 }  
 
@@ -300,27 +313,23 @@ static void updateLEDcompensation(void) {
 
 // 0=off, 255-brightest. Normalized for voltage.   
 
-static inline void setLEDBrightness( uint8_t b) {   
+static inline void setLEDBrightness( uint8_t newBrightness ) {   
      
-    currentLEDBrightness = b;
-
-    OCR1B = b;
+    OCR1B = newBrightness;
     
-    if (b==0) {
-        
-        LED_PWM_off();                  // Turn off timer when not needed to save power
-        
-    } else {
-        
-        //updateLEDcompensation();      // TODO: Make this real
-        LED_PWM_on();                   // Simpler & faster to always turn on timer even if it was already on rather than test and branch
-    }        
+    if ( newBrightness ) {              // faster to always blindly enable rather than test previous value
+        LED_PWM_on();                   // Also forces the new brightness to take effect immediately - although not visible to human eye
+    } else  {
+        LED_PWM_off();                  // Turn off timer when LED off to save power
+    }
+    
+    currentLEDBrightness = newBrightness;
                 
 }    
 
 // Breath data thanks to Lady Ada
 
-// MUST end with 0 brightness or else LED will stay on durring sleep and kill battery.
+// MUST end with 0 brightness or else LED will stay on during sleep and kill battery.
 // If you want to change to a pattern that does not end at 0, then add a line to manually set brightness to zero 
 // when existing breathe mode.
 
@@ -330,26 +339,27 @@ const PROGMEM uint8_t breath_data[] =  {
     
 };
 
-
 #define BREATH_LEN (sizeof( breath_data) / sizeof( *breath_data ))
 
-
-uint8_t breath(uint8_t step) {
+static uint8_t breath(uint8_t step) {
 
   uint8_t brightness = pgm_read_byte_near( breath_data + step);
   return brightness;
   
 }
 
+static uint8_t shadow[32];
 
-uint8_t shadow[32];
-
-static  uint16_t get_shadow_reg(si4702_register reg)
+static uint16_t get_shadow_reg(si4702_register reg)
 {
 	return (shadow[reg] << 8) | (shadow[reg + 1]);
 }
 
-static  void set_shadow_reg(si4702_register reg, uint16_t value)
+// Making this a macro saves 20 bytes of precious flash
+
+#define set_shadow_reg(reg,value) shadow[reg] = (value) >> 8; shadow[reg + 1] = (value) & 0xff
+
+static inline void set_shadow_reg2(si4702_register reg, uint16_t value)
 {
 	shadow[reg] = value >> 8;
 	shadow[reg + 1] = value & 0xff;
@@ -357,7 +367,7 @@ static  void set_shadow_reg(si4702_register reg, uint16_t value)
 
 // Read all the registers. The FM_IC starts reads at register 0x0a and then wraps around
 
-void si4702_read_registers(void)
+static void si4702_read_registers(void)
 {
     USI_TWI_Read_Data( FMIC_ADDRESS , shadow , 0x10 * 2 );      // Total of 16 registers, each 2 bytes
 }
@@ -370,7 +380,7 @@ void si4702_read_registers(void)
 // No reason to overwrite registers that we have not changed - especially 0x07 which has conflicting
 // documentation about what to write there after powerup. Better to leave it be!
 
-void si4702_write_registers(unsigned upto_reg)
+static void si4702_write_registers(unsigned upto_reg)
 {
 	//USI_TWI_Start_Transceiver_With_Data(0x20, &(shadow[REGISTER_02]), 12);
         
@@ -378,7 +388,6 @@ void si4702_write_registers(unsigned upto_reg)
     
     USI_TWI_Write_Data( FMIC_ADDRESS ,  &(shadow[REGISTER_02]) , ( upto_reg - REGISTER_02 + 2) );
 }
-
 
 // Blink a byte out pin 2 (normally button)
 
@@ -418,7 +427,7 @@ void debugBlinkByte( uint8_t data ) {
  * tune_direct() -	Directly tune to the specified channel.
  * Assumes chan < 0x01ff
  */
-void tune_direct(uint16_t chan)
+static void tune_direct(uint16_t chan)
 {
 
 	set_shadow_reg(REGISTER_03, 0x8000 | chan );
@@ -437,7 +446,7 @@ void tune_direct(uint16_t chan)
 	si4702_write_registers( REGISTER_03 );
 }
 
-uint16_t currentChanFromShadow(void) {
+static uint16_t currentChanFromShadow(void) {
     return( get_shadow_reg(REGISTER_03 & 0x1ff));
 }    
 
@@ -446,7 +455,7 @@ uint16_t currentChanFromShadow(void) {
  *			Just change the 2 bytes @ EEPROM_CHANNEL,
  *			recalculate the CRC, and then write that.
  */
-void update_channel(uint16_t channel)
+static void update_channel(uint16_t channel)
 {
 	uint16_t crc = 0x0000;
 	const uint8_t *src;
@@ -491,7 +500,7 @@ static uint16_t check_param_crc(const uint8_t *base)
 /*
  * copy_factory_param() -	Copy the factory default parameters into the
  *				working param area  simple bulk copy of the
- *				entire 16 bytes. No check of the crc.
+ *				entire 16 bytes. 
  */
 
 static void  copy_factory_param(void)
@@ -540,7 +549,7 @@ static void deepSleep(void) {
 // Adjusts LED brightness based on Vcc voltage
 // Assumes Timer is running to PWM the LED
 
-void shutDown(uint8_t blinkCount) {
+static void shutDown(uint8_t blinkCount) {
     
         // SHow blink pattern fora while...
     
@@ -605,7 +614,7 @@ void binaryDebugBlink( uint8_t b ) {
 #define REG_02_ENABLE_BIT    1          // Powerup enable
 
 
-void si4702_init(void)
+static void si4702_init(void)
 {
 	/*
 	 * Init the Si4702 as follows:
@@ -684,6 +693,7 @@ void si4702_init(void)
     set_shadow_reg(REGISTER_02, _BV(REG_02_ENABLE_BIT) );
 
     //set_shadow_reg(REGISTER_02,   (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );
+    //set_shadow_reg(REGISTER_02,  _BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );  
 
 	si4702_write_registers( REGISTER_02 );
     
@@ -731,7 +741,7 @@ void si4702_init(void)
 	set_shadow_reg(REGISTER_03, 0x8000 |  chan );
 
 	si4702_write_registers( REGISTER_03 );
-
+    
 
     /*   
         Seek/Tune Time8,11 SPACE[1:0] = 0x, RCLK
@@ -846,7 +856,7 @@ ISR( PCINT0_vect )
 {
 
     // Do nothing in ISR, just here so we can catch the interrupt and wake form deep sleep
-    // ISRs are ugly syemantics with voltaile access and stuff, simple to handle in main thread. 
+    // ISRs are ugly semantics with volatile access and stuff, simpler to handle in main thread. 
     
    return;
    
@@ -855,7 +865,6 @@ ISR( PCINT0_vect )
 // Assumes button is actually down and LED_Timer is on
 // Always waits for the debounced up before returning
 // Call from main assumes that LED will be off when this returns
-
 
 static void handleButtonDown(void) {
     
@@ -996,6 +1005,60 @@ static int readProgrammingPacket(void) {
 }    
 
 
+void timertest(void) {
+    
+    
+    TCNT1=254;            // Ensure counter not at TOP value
+    
+	OCR1C = 255;        // Set TOP at MAX
+    
+    OCR1B = 15;         // No match
+    
+    GTCCR =     
+        _BV( PWM1B  ) |          // Enable PWM module B
+        _BV( COM1B1 )            // OC1x cleared on compare match. Set when TCNT1 = $00.
+    ;
+    
+        
+    _delay_ms(1000);
+    
+    TCCR1 = _BV( CS12 );        // Enable timer, PCK/8        
+    
+    while (1);
+    
+    //OCR1B = 16;
+
+    CBI( GTCCR , PWM1B );    
+    //CBI( GTCCR , COM1B1 );
+    //SBI( GTCCR , COM1B1 );
+    SBI( GTCCR , PWM1B );
+    
+    while (1);
+    
+
+    
+    GTCCR =     
+        _BV( PWM1B  ) |          // Enable PWM module B
+        _BV( COM1B1 )            // OC1x cleared on compare match. Set when TCNT1 = $00.
+    ;
+    
+    while (1);
+    GTCCR =     
+        _BV( PWM1B  ) |          // Enable PWM module B
+        _BV( COM1B1 )            // OC1x cleared on compare match. Set when TCNT1 = $00.
+    ;
+    
+    
+    //TCCR1 = _BV( CS12 );        // Enable timer, PCK/8           
+    
+    //while (TCNT1 < 5); 
+    
+    //TCCR1 = 0;
+    
+        
+}
+
+
 int main(void)
 {
     
@@ -1006,7 +1069,8 @@ int main(void)
         
 	SBI( DDRB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
                                    // Keeps input pin from floating and toggling unnecessarily and wasting power
-            
+         
+                
     adc_on();
     
     if (!VCC_GT(LOW_BATTERY_VOLTAGE)) {
@@ -1120,7 +1184,6 @@ int main(void)
     
 	si4702_init();
     // Radio is now on and tuned
-                 
     
     // I know gotos are forboden in civil society, but can you think of a better way to express this that is not overly baroque?    
     //If so, please LMK! -josh
@@ -1141,7 +1204,7 @@ int main(void)
              
                 handleButtonDown(); 
                                                
-                goto startBreatheOver;
+                goto startBreatheOver;      // Looks nice to have LED start cycle over after button press
                 
                 // I think this is right UX? Breathe lasts 2 mins since last interaction (power on or button press)
                    
@@ -1168,12 +1231,10 @@ int main(void)
         
         deepSleep();
         
-        if (buttonDown()) {         // We only care about presses, not lifts
-            
+        if (buttonDown()) {         // We only care about presses, not lifts            
             
             handleButtonDown();     // Always wait for the debounced up before returning
-            
-            
+                        
         }            
         
     }        
