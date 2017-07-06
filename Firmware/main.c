@@ -199,7 +199,7 @@ typedef enum {
 #define EEPROM_SPACING		((const uint8_t *)2)
 #define EEPROM_CHANNEL		((const uint16_t *)3)
 #define EEPROM_VOLUME		((const uint8_t *)5)
-#define	EEPROM_CRC16		((const uint16_t *)14)
+#define	EEPROM_CRC16		((const uint16_t *)14)      // Each block has an independent CRC-16
 
 #define EEPROM_PARAM_BLOCK_SIZE	(16)
 
@@ -311,11 +311,14 @@ static void updateLEDcompensation(void) {
     }    
 }    
 
+
+#define MIN(a,b) (((a)<(b))?(a):(b))
+
 // 0=off, 255-brightest. Normalized for voltage.   
 
 static inline void setLEDBrightness( uint8_t newBrightness ) {   
      
-    OCR1B = newBrightness;
+    OCR1B = MIN((newBrightness)/16,8);            //TODO:this is a hack, fix the lookup table to have correct values
     
     if ( newBrightness ) {              // faster to always blindly enable rather than test previous value
         LED_PWM_on();                   // Also forces the new brightness to take effect immediately - although not visible to human eye
@@ -1081,7 +1084,7 @@ int main(void)
         
         // TODO: Probably only need to blink for a minute and then go into deep sleep?
         
-        // NOTE that here we are dring the LED directly full on rather than PWM
+        // NOTE that here we are driving the LED directly full on rather than PWM
         // Since the battery is already low, this will give us max brightness.
          
          
@@ -1183,10 +1186,11 @@ int main(void)
 
     
 	si4702_init();
+    
     // Radio is now on and tuned
     
     // I know gotos are forboden in civil society, but can you think of a better way to express this that is not overly baroque?    
-    //If so, please LMK! -josh
+    // If so, please LMK! -josh
     
     startBreatheOver:
     
