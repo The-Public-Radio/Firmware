@@ -743,6 +743,8 @@ static void si4702_init(void)
 	 */
     
 	set_shadow_reg(REGISTER_04, (eeprom_read_byte(EEPROM_DEEMPHASIS) ? _BV( DE ) : 0x0000));
+    
+    // TODO: These ANDs can go if we ever need room - if these bytes are not 0 padded correctly then something is very wrong. 
 
 	set_shadow_reg(REGISTER_05,
 			(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
@@ -794,11 +796,12 @@ static void si4702_init(void)
     // More where needed here. 
     
     // Even though only 60ms spec'ed, if we don't wait for 100ms before unmute then we hear a a blink of music before the pop. Arg. 
-    _delay_ms(100);
+   // _delay_ms(100);
     
     // We should be all tuned up and ready to go when we get here, so setup auto and unmute and let the music play!
     set_shadow_reg(REGISTER_02,  _BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );  
-    
+
+    // TODO: Play with this more. Can we get rid of the click here?    
 
     /*
         The tune operation begins when the TUNE bit is set high. The STC bit is set high
