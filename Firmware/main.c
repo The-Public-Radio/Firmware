@@ -194,6 +194,41 @@ typedef enum {
 	REGISTER_15 = 10,
 } si4702_register;
 
+// Register bits
+// Based on https://github.com/sparkfun/Si4703_FM_Tuner_Evaluation_Board/blob/V_H1.3_L1.2.0/Libraries/Arduino/src/SparkFunSi4703.h
+
+static const uint16_t  DEVICEID = 0x00;
+static const uint16_t  CHIPID = 0x01;
+static const uint16_t  POWERCFG = 0x02;
+static const uint16_t  CHANNEL = 0x03;
+static const uint16_t  SYSCONFIG1 = 0x04;
+static const uint16_t  SYSCONFIG2 = 0x05;
+static const uint16_t  STATUSRSSI = 0x0A;
+static const uint16_t  READCHAN = 0x0B;
+static const uint16_t  RDSA = 0x0C;
+static const uint16_t  RDSB = 0x0D;
+static const uint16_t  RDSC = 0x0E;
+static const uint16_t  RDSD = 0x0F;
+
+//Register 0x02 - POWERCFG
+static const uint16_t  SMUTE = 15;
+static const uint16_t  DMUTE = 14;
+static const uint16_t  SKMODE = 10;
+static const uint16_t  SEEKUP = 9;
+static const uint16_t  SEEK = 8;
+
+//Register 0x03 - CHANNEL
+static const uint16_t  TUNE = 15;
+
+//Register 0x04 - SYSCONFIG1
+static const uint16_t  RDS = 12;
+static const uint16_t  DE = 11;
+
+//Register 0x05 - SYSCONFIG2
+static const uint16_t  SPACE1 = 5;
+static const uint16_t  SPACE0 = 4;
+
+
 #define EEPROM_BAND		    ((const uint8_t *)0)
 #define EEPROM_DEEMPHASIS	((const uint8_t *)1)
 #define EEPROM_SPACING		((const uint8_t *)2)
@@ -669,21 +704,23 @@ static void si4702_init(void)
     
     // Reg 0x07 bits 13:0 - Reserved. If written, these bits should be read first and then written with their pre-existing values. Do not write during powerup.
     // BUT Datasheet also says Bits 13:0 of register 07h must be preserved as 0x0100 while in powerdown and as 0x3C04 while in powerup.
-   // si4702_read_registers();  
+    
+    // Note that Sparkfun library also does it this way, so should be ok. 
+    // https://github.com/sparkfun/Si4703_FM_Tuner_Evaluation_Board/blob/V_H1.3_L1.2.0/Libraries/Arduino/src/SparkFunSi4703.cpp#L133
 
 	set_shadow_reg(REGISTER_07, 0x8100);
 
 	si4702_write_registers(REGISTER_07);
-
+    
     /*
 
         Wait for crystal to power up (required for crystal oscillator operation).
-        Provide a sufficient delay (minimum 500 ms) for the oscillator to stabilize. See 2.1.1. "Hardware Initialization”
+        Provide a sufficient delay (minimum 500 ms) for the oscillator to stabilize. See 2.1.1. "Hardware Initialization
         step 5.    
     
     */
 
-	_delay_ms(600);
+	_delay_ms(500);
 
     /*    
         Set the ENABLE bit high and the DISABLE bit low to
@@ -693,33 +730,19 @@ static void si4702_init(void)
            
     // Note that if we unmute here, we get a "click" before the radio tunes 
             
-    set_shadow_reg(REGISTER_02, _BV(REG_02_ENABLE_BIT) );
-
-    //set_shadow_reg(REGISTER_02,   (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );
-    //set_shadow_reg(REGISTER_02,  _BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );  
-
-	si4702_write_registers( REGISTER_02 );
+    // Ok folks, likes like you *must* enable RDS in "Verbose" mode here or else 
+    // some silicon (seems like older) will sometimes (not everytime) come up in a wierd mode with a 
+    // hum over the audio. WTF Si?
     
-    /*    
-        Software should wait for the powerup
-        time (as specified by Table 8, “FM Receiver
-        Characteristics1,2,” on page 12) before continuing with
-        normal part operation.  
-        
-        Powerup Time From powerdown
-        (Write ENABLE bit to 1)
-        max 110 ms        
-          
-    */    
-
-	_delay_ms(110);
+    set_shadow_reg(REGISTER_02, 0x4001 );
     
-
+   
+   
 	/*
 	 * Set radio params based on eeprom...
 	 */
     
-	set_shadow_reg(REGISTER_04, get_shadow_reg(REGISTER_04) | (eeprom_read_byte(EEPROM_DEEMPHASIS) ? 0x0800 : 0x0000));
+	set_shadow_reg(REGISTER_04, (eeprom_read_byte(EEPROM_DEEMPHASIS) ? _BV( DE ) : 0x0000));
 
 	set_shadow_reg(REGISTER_05,
 			(((uint16_t)(eeprom_read_byte(EEPROM_BAND) & 0x03)) << 6) |
@@ -734,8 +757,22 @@ static void si4702_init(void)
     // If we try to batch them into one write then we get no audio. Hmmm. 
     
 	si4702_write_registers( REGISTER_05 );
+
+
+    /*    
+        Software should wait for the powerup
+        time (as specified by Table 8, “FM Receiver
+        Characteristics1,2,” on page 12) before continuing with
+        normal part operation.  
+        
+        Powerup Time From powerdown
+        (Write ENABLE bit to 1)
+        max 110 ms        
+          
+    */    
     
-    
+    _delay_ms(110); 
+              
     uint16_t chan = eeprom_read_word(EEPROM_CHANNEL);       // Assumes this does not have bit 15 set. 
     
     //uint16_t chan = 0x0040;                                  // test with z100.
@@ -745,7 +782,6 @@ static void si4702_init(void)
 
 	si4702_write_registers( REGISTER_03 );
     
-
     /*   
         Seek/Tune Time8,11 SPACE[1:0] = 0x, RCLK
         tolerance = 200 ppm, (x = 0 or 1)
