@@ -699,7 +699,7 @@ static void si4702_init(void)
     // Note that if we unmute here, we get a "click" before the radio tunes 
 
     // Ok folks, likes like you *must* enable RDS in "Verbose" mode here or else 
-    // some silicon (seems like older) will sometimes (not everytime) come up in a wierd mode with a 
+    // some silicon (seems like older) will sometimes (not everytime) come up in a weird mode with a 
     // hum over the audio. WTF Si?
     
     set_shadow_reg(REGISTER_02, 0x4001 );                
