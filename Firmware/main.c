@@ -336,17 +336,33 @@ static inline void setLEDBrightness( uint8_t newBrightness ) {
 // If you want to change to a pattern that does not end at 0, then add a line to manually set brightness to zero 
 // when existing breathe mode.
 
+
+
 const PROGMEM uint8_t breath_data[] =  {
         
- 1, 1, 2, 3, 5, 8, 11, 15, 20, 25, 30, 36, 43, 49, 56, 64, 72, 80, 88, 97, 105, 114, 123, 132, 141, 150, 158, 167, 175, 183, 191, 199, 206, 212, 219, 225, 230, 235, 240, 244, 247, 250, 252, 253, 254, 255, 254, 253, 252, 250, 247, 244, 240, 235, 230, 225, 219, 212, 206, 199, 191, 183, 175, 167, 158, 150, 141, 132, 123, 114, 105, 97, 88, 80, 72, 64, 56, 49, 43, 36, 30, 25, 20, 15, 11, 8, 5, 3, 2, 1, 0
+ 0, 1, 1, 2, 3, 5, 8, 11, 15, 20, 25, 30, 36, 43, 49, 56, 64, 72, 80, 88, 97, 105, 114, 123, 132, 141, 150, 158, 167, 175
     
 };
 
-#define BREATH_LEN (sizeof( breath_data) / sizeof( *breath_data ))
+
+#define BREATH_CYCLE_LEN ((sizeof( breath_data) / sizeof( *breath_data )) * 2)      // *2 because we walk the values up and then back down
+
 
 static uint8_t breath(uint8_t step) {
+    
+  uint8_t lookup;         // Map  steps to 1/2 as many lookups (pattern is symmetric around center)
+  
+  if (step<(BREATH_CYCLE_LEN/2)) {
+      
+      lookup = step;
+      
+   } else {
+       
+       lookup = (BREATH_CYCLE_LEN-1) -  step ;
+      
+  }      
 
-  uint8_t brightness = pgm_read_byte_near( breath_data + step);
+  uint8_t brightness = pgm_read_byte_near( breath_data + lookup );
   return brightness;
   
 }
@@ -1105,7 +1121,7 @@ int main(void)
     
     for(uint8_t countdown = BREATH_COUNT_TIMEOUT_S ; countdown; countdown-- ) {
         
-        for(uint8_t cycle=0; cycle<BREATH_LEN; cycle++ ) { 
+        for(uint8_t cycle=0; cycle<(BREATH_CYCLE_LEN); cycle++ ) { 
                    
             setLEDBrightness( breath(cycle)  );
         
