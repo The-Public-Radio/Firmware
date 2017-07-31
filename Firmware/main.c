@@ -141,7 +141,6 @@
 
 #include "USI_TWI_Master.h"
 #include "VccADC.h"
-#include "VccProg.h"
 
 #define FMIC_ADDRESS        (0b0010000)                // Hardcoded for this chip, "a seven bit device address equal to 0010000"
 
@@ -363,7 +362,9 @@ static uint16_t get_shadow_reg(si4702_register reg)
 
 #define set_shadow_reg(reg,value) shadow[reg] = (value) >> 8; shadow[reg + 1] = (value) & 0xff
 
-static inline void set_shadow_reg2(si4702_register reg, uint16_t value)
+// Real code for above macro for clarity (but unused here to save space)
+
+static inline void set_shadow_reg_non_macro(si4702_register reg, uint16_t value)
 {
 	shadow[reg] = value >> 8;
 	shadow[reg + 1] = value & 0xff;
@@ -933,85 +934,6 @@ static void handleButtonDown(void) {
 
 
 
-// Attempt to read a programming packet, act on any valid ones received
-
-static int readProgrammingPacket(void) {
-        
-    uint16_t crc = 0x0000;
-            
-    int d;
-           
-    d = readPbyte();    
-    if (d<0) return(d); // Check for error    
-    crc = _crc16_update(crc, d );    
-    
-    uint16_t channel = d << 8;                 // Byte 1: channel high byte
-    
-    d = readPbyte();    
-    if (d<0) return(d); // Check for error    
-    crc = _crc16_update(crc, d );    
-    
-    channel |= d;                              // Byte 2: channel low byte    
-
-
-/*
-
-    d = readPbyte();    
-    if (d<0) return(d); // Check for error    
-    crc = _crc16_update(crc, d );    
-    
-    uint8_t deemphasis = d;
-
-        
-    d = readPbyte();    
-    if (d<0) return(d); // Check for error    
-    crc = _crc16_update(crc, d );    
-    
-    uint8_t band = d;
-    
-    d = readPbyte();    
-    if (d<0) return(d); // Check for error    
-    crc = _crc16_update(crc, d );    
-    
-    uint8_t spacing = d;
-
-*/
-    
-    // Calculate the crc check
-  
-    uint16_t crc_rec = 0x0000;              // crc received in packet
-    
-           
-    d = readPbyte();    
-    if (d<0) return(d); // Check for error    
-    crc_rec = d << 8;                       // Byte 3: received crc high byte
-
-    d = readPbyte();    
-    if (d<0) return(d); // Check for error    
-    crc_rec |= d;                           // Byte 4: received crc low byte
-    
-    if ( crc != crc_rec ) {                 // Compared received crc to calculated crc
-        
-        debugBlink(1);                      // Three short blinks = bad crc
-        return(-1); 
-        
-    }        
-    
-    
-    // TODO: Is this necessary?
-    
-    _delay_ms(50);      // Let capacitor charge up a bit
-    
-    update_channel( channel );    // TODO: use LED dimming here
-                
-    // TODO: User PWM for LED                
-                
-    debugBlink(4);          // two short blinks = programming accepted
-    
-    return(0); 
-                    
-}    
-
 
 void timertest(void) {
     
@@ -1126,27 +1048,7 @@ int main(void)
     // Since we know we have good voltage, we can use PWM on the LED for now on... 
         
     LED_PWM_init();          // Make it so we can pwm the LED for now on...
-                    
-    if (programmingVoltagePresent()) {          
-        
-        // Ok, we are currently being powered by a programmer since a battery could not make the voltage go this high
-        
-        // The VccProg stuff depends on the ADC,which is already on here. 
-        
-        // DDRB |= _BV(0);     // Show the search window for testing
-        
-        while (1) {
-        
-            readProgrammingPacket();      // wait for a darn good programming packet
-            
-        }
-        
-        // Never get here.
-        // Would be nice to power up for a test now, but not enough current.
-        // Maybe need more pins or a better contact surface.                             
-                    
-    }     
-            
+                                
     adc_off();      /// All done with the ADC, so same a bit of power      
     
     // TODO: Check battery voltage periodically and shutdown if it goes low durring operation.     
