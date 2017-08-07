@@ -257,7 +257,6 @@ unsigned char USI_TWI_Write_Data(unsigned char addr, const uint8_t *buffer , uin
     
 }
 
-/*
 
 // Fill data buffer with bytes read from TWI
 // addr is the chip bus address
@@ -282,21 +281,20 @@ unsigned char USI_TWI_Read_Data(unsigned char addr, uint8_t *buffer , uint8_t co
     
     // TODO: Is this Really needed? Can we just do repeat starts and save this code? Spec is vague if address is reset on start. 
     // TODO: Make stop function to save space
+    
     sda_drive_low();
     scl_pull_high();
     _delay_us(BIT_TIME_US);
     
     sda_pull_high();
     _delay_us(BIT_TIME_US);
-    
-    
+        
     // End transaction with bus in idle
     
     return(0);
     
 }
 
-*/
 // TODO: delete this placeholder
 
 /*

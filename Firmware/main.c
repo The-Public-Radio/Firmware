@@ -185,13 +185,34 @@ typedef enum {
 	REGISTER_07 = 26,
 	REGISTER_08 = 28,
 	REGISTER_09 = 30,
-	REGISTER_10 =  0,
-	REGISTER_11 =  2,
-	REGISTER_12 =  4,
-	REGISTER_13 =  6,
-	REGISTER_14 =  8,
-	REGISTER_15 = 10,
+	REGISTER_0A =  0,
+	REGISTER_0B =  2,
+    
+
+    // These not used in current implementation. 
+	REGISTER_0C =  4,
+	REGISTER_0D =  6,
+	REGISTER_0E =  8,
+	REGISTER_0F = 10,
+        
 } si4702_register;
+
+
+// RF-IC Stuff below
+
+#define REG_02_DSMUTE_BIT       15          // Softmute enable
+#define REG_02_DMUTE_BIT        14          // Mute disable
+#define REG_02_MONO_BIT         13          // Mono select
+#define REG_02_RDSM_VERBOSE_BIT 11          // Old code had a comment that this must be enabled?
+#define REG_02_SKMODE           10          // 0 = Wrap at the upper or lower band limit and continue seeking (default). 1 = Stop seeking at the upper or lower band limit.
+#define REG_02_SEEKUP_BIT        9          // 0 = Seek down (default). 1 = Seek up.
+#define REG_02__SEEK             8          // This is a command. 1 = Enable. A seek operation may be aborted by setting SEEK = 0.
+#define REG_02_ENABLE_BIT        1          // Power up enable
+
+#define REG_02_DEFAULT       (_BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) | _BV(REG_02_SEEKUP_BIT) )       // Sensible values we want at startup and when seeking
+
+
+#define REG_04_DE_BIT       11          // Deemphasis
 
 
 #define EEPROM_BAND		    ((const uint8_t *)0)
@@ -386,11 +407,14 @@ static inline void set_shadow_reg_non_macro(si4702_register reg, uint16_t value)
 	shadow[reg + 1] = value & 0xff;
 }
 
-// Read all the registers. The FM_IC starts reads at register 0x0a and then wraps around
+// Read registers 0x0a and 0x0b from FM_IC.
+// We really only care about 0x0b because this is where the current channel is saved after a seek.
+// We have to read both becuase all TWO reads on this chip start at register 0x0a (they wraps around to at 0x0f) 
+// We need 0x03 so we can check what station we landed on after a seek.
 
-static void si4702_read_registers(void)
+static void si4702_read_registers_upto_0B(void)
 {
-    USI_TWI_Read_Data( FMIC_ADDRESS , shadow , 0x10 * 2 );      // Total of 16 registers, each 2 bytes
+    USI_TWI_Read_Data( FMIC_ADDRESS , shadow , REGISTER_0B - REGISTER_0A + 2 );      // Total of 10 registers,  each 2 bytes
 }
 
 /*
@@ -441,7 +465,17 @@ void debugBlinkByte( uint8_t data ) {
     CBI( DDRB , PB3 );// TODO: TESTING
     SBI( PORTB , PB3 );// TODO: TESTING
     
-}    
+}   
+
+
+
+/*
+ * Seek thresholds - see Appendix of SiLabs AN230
+ * TODO: Set these according to AN284?
+ */
+#define	SEEK_RSSI_THRESHOLD	(10)
+#define	SEEK_SNR_THRESHOLD	(2)
+#define SEEK_IMPULSE_THRESHOLD	(4)
 
 
 /*
@@ -467,10 +501,6 @@ static void tune_direct(uint16_t chan)
 	si4702_write_registers( REGISTER_03 );
 }
 
-static uint16_t currentChanFromShadow(void) {
-    return( get_shadow_reg(REGISTER_03 & 0x1ff));
-}    
-
 /*
  * update_channel() -	Update the channel stored in the working params.
  *			Just change the 2 bytes @ EEPROM_CHANNEL,
@@ -494,6 +524,76 @@ static void update_channel(uint16_t channel)
 	eeprom_write_word((uint16_t *)EEPROM_CRC16, crc);
     
 }
+
+// Note: must read the registers from the FM_IC first with si4702_read_registers_upto_0B()
+// THis gets the current channel after a seek.
+
+/*
+
+Register 0Bh. Read Channel
+
+9:0 READCHAN[9:0] Read Channel.
+READCHAN[9:0] provides the current tuned channel and is updated during a seek
+operation and after a seek or tune operation completes. Spacing and channel are set
+with the bits SPACE 05h[5:4] and CHAN 03h[9:0].
+
+*/
+
+
+static uint16_t currentSeekChanFromShadow(void) {
+    return( get_shadow_reg(REGISTER_0B & 0x1ff));
+}    
+
+// read the current channel from the RF-IC and save to eeprom. 
+// We need this on a long press to save a new station after a seek.
+
+static void updateToCurrentChannel(void) {
+    
+    si4702_read_registers_upto_0B();
+    
+    update_channel( currentSeekChanFromShadow() ); 
+    
+}    
+
+
+
+// Issue a seek, come what may.
+// Note that state gets mussy here. We don't check for when the seek ends because it would use
+// previous code space and also checking messes with the RFIC and can cause us to miss stations.
+// We just blindly send the seek command even if there is already a seek in progress. It is going to be ok. 
+
+// Seek settings taken from original version of this code.
+// TODO: Should we adjust seek settings based on AN284 app note?
+
+static void seekNext(void) {
+                
+        /* 
+    
+        "The STC and SF/BL bits must be set low by setting the SEEK bit low
+        before the next seek or tune may begin/"        
+        */
+                
+                
+    set_shadow_reg(REGISTER_02, REG_02_DEFAULT  );            
+    
+    si4702_write_registers( REGISTER_02 );
+    
+    // Empirically determined that we need this delay.
+    // We we follow the stop with a stary immmedetaly, it does not work. 
+    // 1ms was the 1st guess and it worked. 
+   
+    
+    _delay_ms(1);
+                
+            
+    // Set "SEEK" bit on - begins the seek
+            
+    set_shadow_reg(REGISTER_02, REG_02_DEFAULT | _BV(REG_02__SEEK) );            
+    
+    si4702_write_registers( REGISTER_02 );
+                
+    
+}    
 
 
 /*
@@ -629,12 +729,6 @@ void binaryDebugBlink( uint8_t b ) {
 }    
 
 
-#define REG_02_DSMUTE_BIT   15          // Softmute enable
-#define REG_02_DMUTE_BIT    14          // Mute disable
-#define REG_02_MONO_BIT     13          // Mono select
-#define REG_02_ENABLE_BIT    1          // Powerup enable
-
-#define REG_04_DE_BIT       11          // Deemphassis
 
 
 static void si4702_init(void)
@@ -734,14 +828,25 @@ static void si4702_init(void)
 			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4) |
             (((uint16_t)(eeprom_read_byte(EEPROM_VOLUME) & 0x0f)))           
     );
-
+    
+    
+	/*
+	 * Set the seek SNR and impulse detection thresholds.
+	 */
+    
+    // We are writing up to REGISTER_05 soon anyway, sind as well set 06 here too while we are up there
+    // even though we may never need these set (only used if user presses button to seek)
+    
+	set_shadow_reg(REGISTER_06,
+			(SEEK_SNR_THRESHOLD << 4) | SEEK_IMPULSE_THRESHOLD);
+    
 
     // If we Unmute here, then you hear a blip of music before a click. Arg. 
 
     // Note that this write looks like it must come before the tune.
     // If we try to batch them into one write then we get no audio. Hmmm. 
     
-	si4702_write_registers( REGISTER_05 );
+	si4702_write_registers( REGISTER_06 );
 
 
     /*    
@@ -782,7 +887,7 @@ static void si4702_init(void)
    // _delay_ms(100);
     
     // We should be all tuned up and ready to go when we get here, so setup auto and unmute and let the music play!
-    set_shadow_reg(REGISTER_02,  _BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) );  
+    set_shadow_reg(REGISTER_02, REG_02_DEFAULT );  
 
     // TODO: Play with this more. Can we get rid of the click here?    
 
@@ -897,8 +1002,6 @@ static void handleButtonDown(void) {
     
     _delay_ms( BUTTON_DEBOUNCE_MS );        // Debounce down
         
-    uint16_t currentChan = currentChanFromShadow();
-
     uint16_t countdown = LONG_PRESS_MS;
     
     while (countdown && buttonDown()) {       // Spin until either long press timeout or they let go
@@ -909,20 +1012,9 @@ static void handleButtonDown(void) {
     if (countdown) {                            // Did not timeout, so short press
         
         // Advance to next station
-            
-        currentChan++;
-            
-        // Input Frequency fRF 76 — 108 MHz
-        // TODO: Adjust for band
-            
-        if (currentChan > (1080-760) ) {        // Wrap at top of band back down to bottom
-                
-            currentChan = 0; 
-                
-        }                
         
-        tune_direct(  currentChan );
-            
+        seekNext();
+                        
         // TODO: test this wrap (lots of button presses, so start high!)
         
         
@@ -933,14 +1025,18 @@ static void handleButtonDown(void) {
         // User feedback of long press with long flash on LED
         
         setLEDBrightness(255);        
-            
-        update_channel( currentChan );      
-              
+                            
+        updateToCurrentChannel();      // TODO: This no longer works with seek rather than step.
+                      
         _delay_ms(500);
 
         setLEDBrightness(0);            
                 
+                
         while (buttonDown());           // Wait for them to finally release the button- hopefully after seeing the confirmation long blink
+        
+        
+        tune_direct( currentSeekChanFromShadow() );
            
     }    
 
