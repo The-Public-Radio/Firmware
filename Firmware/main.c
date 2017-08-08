@@ -134,6 +134,7 @@
 #include <avr/sleep.h>
 #include <avr/eeprom.h>
 #include <util/crc16.h>
+#include <avr/wdt.h>
 
 #define	F_CPU	1000000UL
 #include <util/delay.h>
@@ -164,10 +165,10 @@
 
 #define DIAGNOSTIC_BLINK_BADEEPROM     3            // EEPROM user settings failed CRC check on startup
 #define DIAGNOSTIC_BLINK_LOWBATTERY    2            // Battery too low for operation. 
-#define DIAGNOSTIC_BLINK_NONE          0
 
 #define  DIAGNOSTIC_BLINK_TIMEOUT_S   120           // Show diagnostic blink at least this long before going to sleep
                                                     // Give user time to see it, but don't go too long because we will
+
                                                     // make crusty batteries. Must fit in unit8_t.
 
 #define SBI(port,bit) (port|=_BV(bit))
@@ -242,7 +243,7 @@ static inline void LED_PWM_init(void)
     // We are using simple PWM mode to drive OCR1B which is connected to the LED.
     // We are driving off the system clock, not the PLL
     // We are using non-inverting mode where OCR is set at 0 and cleared at match, so lower matches are less brightness
-    // Note that if OCR is 0, then there i not pulse geenrated so LED stays off
+    // Note that if OCR is 0, then there i not pulse generated so LED stays off
     
     
     // We are going to run PWM mode
@@ -337,10 +338,12 @@ static void updateLEDcompensation(void) {
 
 // 0=off, 255-brightest. Normalized for voltage.   
 
-static inline void setLEDBrightness( uint8_t newBrightness ) {   
+static void setLEDBrightness( uint8_t newBrightness ) {   
      
-    OCR1B = MIN((newBrightness)/16,8);            //TODO:this is a hack, fix the lookup table to have correct values
+    //OCR1B = MIN((newBrightness)/16,8);            //TODO:this is a hack, fix the lookup table to have correct values
     
+    OCR1B = newBrightness;            //TODO:this is a hack, fix the lookup table to have correct values
+        
     if ( newBrightness ) {              // faster to always blindly enable rather than test previous value
         LED_PWM_on();                   // Also forces the new brightness to take effect immediately - although not visible to human eye
     } else  {
@@ -636,28 +639,50 @@ static void  copy_factory_param(void)
 }
 
 
-void debugBlink( uint8_t b ) {
-             
-    for(int p=0; p<b; p++ ) {   
-        SBI( PORTB , LED_DRIVE_BIT);
-        _delay_ms(10);
-        CBI( PORTB , LED_DRIVE_BIT);
-        _delay_ms(200);            
-    }
-         
-    _delay_ms(1000);            
-            
-}    
-
 
 
 // Goto bed, will only wake up on button press interrupt (if enabled) or WDT
 
-static void deepSleep(void) {    
+static void deepSleep(void) {
 	set_sleep_mode( SLEEP_MODE_PWR_DOWN );
     sleep_enable();
     sleep_cpu();        // Good night    
-}   
+}  
+
+
+// Don't do anything, just the interrupt itself will wake us up
+// TODO: If we ever need more code space, this could be replaced by an IRET in the VECTOR table. 
+
+EMPTY_INTERRUPT( WDT_vect );
+
+#define HOWLONG_16MS   (_BV(WDIE) )
+#define HOWLONG_32MS   (_BV(WDIE) | _BV( WDP0) )
+#define HOWLONG_64MS   (_BV(WDIE) | _BV( WDP1) )
+#define HOWLONG_125MS  (_BV(WDIE) | _BV( WDP1) | _BV( WDP0) )
+#define HOWLONG_250MS  (_BV(WDIE) | _BV( WDP2) )
+#define HOWLONG_500MS  (_BV(WDIE) | _BV( WDP2) | _BV( WDP0) )
+#define HOWLONG_1S     (_BV(WDIE) | _BV( WDP2) | _BV( WDP1) )
+#define HOWLONG_2S     (_BV(WDIE) | _BV( WDP2) | _BV( WDP1) | _BV( WDP0) )
+#define HOWLONG_4S     (_BV(WDIE) | _BV( WDP3) )
+#define HOWLONG_8S     (_BV(WDIE) | _BV( WDP3) | _BV( WDP0) )
+
+// Goto sleep - get woken up by the watchdog timer or other interrupt like button
+// This is very power efficient since chip is stopped except for WDT
+// Note that if the timer was on entering here that it will stay on, so LED will still stay lit.
+
+static void sleepFor( uint8_t howlong ) {
+    
+    wdt_reset();
+    WDTCR =   howlong;              // Enable WDT Interrupt  (WDIE and timeout bits all included in the howlong values)
+    
+    sei();
+    deepSleep();
+    cli();
+    
+    WDTCR = 0;                      // Turn off the WDT interrupt (no special sequence needed here)
+                                    // (assigning all bits to zero is 1 instruction and we don't care about the other bits getting clobbered
+    
+}    
 
 
 // Show the user something went wrong and we are shutting down.
@@ -669,66 +694,45 @@ static void deepSleep(void) {
 //
 // Adjusts LED brightness based on Vcc voltage
 // Assumes Timer is running to PWM the LED
+//
+// Call with blinkcount at least 1 or else LED possibly could stay on when asleep and waste power
 
 static void shutDown(uint8_t blinkCount) {
+        
     
-        // SHow blink pattern fora while...
-    
+
+        // Disable FMIC and AMP
+        SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, makes them sleep            
+        
+        // TODO: Do this in PMIC? 
+        
+        // SHow blink pattern for a while...
+                   
         for (uint8_t countdown=DIAGNOSTIC_BLINK_TIMEOUT_S; countdown>0; countdown--) {
+            
             for(uint8_t p=blinkCount; p>0; p-- ) {   
                 setLEDBrightness(255);
-                _delay_ms(20);                  // TODO: What looks best here?
-                setLEDBrightness(0);
-                _delay_ms(200);            
+                sleepFor( HOWLONG_64MS );           // TODO: What looks best here?
+                setLEDBrightness(0);                
+                sleepFor( HOWLONG_500MS );                
             }
-        
-            _delay_ms(1000);    // 1 second pause between blink patterns
             
-        }        
+            sleepFor( HOWLONG_1S );          // 1 second pause between blink patterns
+                    
+        }    
         
-        // Currently only called form places where FMIC and AMP are already in reset    
-             
-        // TODO: Shutdown the amp and FM_IC chips by holding them in reset
+        // Timer is off when we get here because the last LED setbrightness was 0
+        
+        adc_off();
+        
+        
+        // TODO: Test how much current actually used here. Can we lower it with peripheral power control register?
         // TODO: Add a MOSFET so we can completely shut them off (they still pull about 25uA in reset)?
         
         // Interrupts are off, so this will be a sleep we never wake from...
         
         deepSleep();
 }    
-
-
-void debugshortblink(void) {
-    SBI( PORTB , LED_DRIVE_BIT);
-    _delay_ms(50);
-    CBI( PORTB , LED_DRIVE_BIT);
-    _delay_ms(50);                
-}    
-
-
-void binaryDebugBlink( uint8_t b ) {
-    
-    while (1) {
-         
-         for(uint16_t bitmask=0x8000; bitmask !=0; bitmask>>=1) {
-
-            SBI( PORTB , LED_DRIVE_BIT);
-            _delay_ms(200);            
-             
-             if (b & bitmask) {
-                 _delay_ms(200);            
-             }            
-            CBI( PORTB , LED_DRIVE_BIT);
-            
-            _delay_ms(400);
-            
-         }
-         
-         _delay_ms(1000);            
-            
-    }        
-}    
-
-
 
 
 static void si4702_init(void)
@@ -904,44 +908,30 @@ static void si4702_init(void)
         
 }
 
-
-void debug_slowblink(void) {
-    while (1) {
-            
-        SBI( PORTB , LED_DRIVE_BIT);
-        _delay_ms(100);
-        CBI( PORTB , LED_DRIVE_BIT);
-        _delay_ms(900);
-            
-    }    
-}    
-
-void debug_fastblink(void) {
-    while (1) {
-            
-        SBI( PORTB , LED_DRIVE_BIT);
-        _delay_ms(100);
-        CBI( PORTB , LED_DRIVE_BIT);
-        _delay_ms(100);
-            
-    }    
-}    
-
 // Blink  1 second
 
 static void longBlink(void) {
     setLEDBrightness(255);
-    _delay_ms(1000);
+    sleepFor( HOWLONG_1S );
     setLEDBrightness(0);
 }    
-
-
 
 // Returns true if button is down
 
 static inline uint8_t buttonDown(void) {
     return( !TBI( PINB , BUTTON_INPUT_BIT ));           // Button is pulled high, short to ground when pressed
 }    
+
+
+// Called on button press pin change interrupt
+// Do nothing in ISR, just here so we can catch the interrupt and wake form deep sleep
+// ISRs are ugly semantics with volatile access and stuff, simpler to handle in main thread. 
+
+// TODO: If we ever need more code space, this could be replaced by an IRET in the VECTOR table. 
+
+
+EMPTY_INTERRUPT( PCINT0_vect ); 
+
 
 // Setup pin change interrupt on button 
 // returns true of the button was down on entry
@@ -980,17 +970,13 @@ static uint8_t initButton(void)
 
 
 
-// Called on button press pin change interrupt
 
-ISR( PCINT0_vect )
-{
+// Returns 1 if battery too low for operation
+// Assumes that ADC is on
 
-    // Do nothing in ISR, just here so we can catch the interrupt and wake form deep sleep
-    // ISRs are ugly semantics with volatile access and stuff, simpler to handle in main thread. 
-    
-   return;
-   
-}
+static uint8_t lowBatteryCheck() {
+  return( !VCC_GT(LOW_BATTERY_VOLTAGE) );  
+}  
 
 // Assumes button is actually down and LED_Timer is on
 // Always waits for the debounced up before returning
@@ -1034,69 +1020,10 @@ static void handleButtonDown(void) {
                 
                 
         while (buttonDown());           // Wait for them to finally release the button- hopefully after seeing the confirmation long blink
-        
-        
-        tune_direct( currentSeekChanFromShadow() );
-           
+                           
     }    
 
     _delay_ms( BUTTON_DEBOUNCE_MS );        // Debounce the most recent up
-        
-}
-
-
-
-
-void timertest(void) {
-    
-    
-    TCNT1=254;            // Ensure counter not at TOP value
-    
-	OCR1C = 255;        // Set TOP at MAX
-    
-    OCR1B = 15;         // No match
-    
-    GTCCR =     
-        _BV( PWM1B  ) |          // Enable PWM module B
-        _BV( COM1B1 )            // OC1x cleared on compare match. Set when TCNT1 = $00.
-    ;
-    
-        
-    _delay_ms(1000);
-    
-    TCCR1 = _BV( CS12 );        // Enable timer, PCK/8        
-    
-    while (1);
-    
-    //OCR1B = 16;
-
-    CBI( GTCCR , PWM1B );    
-    //CBI( GTCCR , COM1B1 );
-    //SBI( GTCCR , COM1B1 );
-    SBI( GTCCR , PWM1B );
-    
-    while (1);
-    
-
-    
-    GTCCR =     
-        _BV( PWM1B  ) |          // Enable PWM module B
-        _BV( COM1B1 )            // OC1x cleared on compare match. Set when TCNT1 = $00.
-    ;
-    
-    while (1);
-    GTCCR =     
-        _BV( PWM1B  ) |          // Enable PWM module B
-        _BV( COM1B1 )            // OC1x cleared on compare match. Set when TCNT1 = $00.
-    ;
-    
-    
-    //TCCR1 = _BV( CS12 );        // Enable timer, PCK/8           
-    
-    //while (TCNT1 < 5); 
-    
-    //TCCR1 = 0;
-    
         
 }
 
@@ -1111,62 +1038,20 @@ int main(void)
         
 	SBI( DDRB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
                                    // Keeps input pin from floating and toggling unnecessarily and wasting power
-         
-                
+                                   
+                                   
+    LED_PWM_init();                // Set up the PWM so we can use the LED. Note that the timer does not actually get started until we set the brightness.                                   
+                                                                    
     adc_on();
+        
+    // We do a check here before even powering up the FM_IC in case battery is really low, the big draw of the other chips could kill us. 
     
-    if (!VCC_GT(LOW_BATTERY_VOLTAGE)) {
+    if (lowBatteryCheck()) {
         
-        adc_off();  // Mind as well save some power 
+        shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
         
-        // indicate dead battery with a 10%, 1Hz blink
+    }        
         
-        // TODO: Probably only need to blink for a minute and then go into deep sleep?
-        
-        // NOTE that here we are driving the LED directly full on rather than PWM
-        // Since the battery is already low, this will give us max brightness.
-         
-         
-        for( uint8_t i=120; i>0; i--) {             // Blink for 2 minutes (120 seconds)
-            
-            SBI( PORTB , LED_DRIVE_BIT);
-            _delay_ms(100);
-            CBI( PORTB , LED_DRIVE_BIT);
-            _delay_ms(900);
-            
-            // Each cycle 100ms+900ms= ~1 second
-            
-        }
-        
-        // We are not driving any pins except the RESET to keep the FM_IC and AMP asleep
-        // and the LED which is low, so no Wasted power
-        
-        // Note that we never turned on the timer so this should be a very low power sleep. 
-        
-        deepSleep();
-        // Never get here since button int not enabled.
-        
-        // Confirmed power usage in low battery mode @ 2.1V:
-        // 0.60mA while blinking
-        // 0.06mA while sleeping - probably most due to amp and FMIC?
-        
-        // TODO: Should probably periodically wake up durring normal playing and check for low battery
-        // so someone leaving it on does not run into the ground. 
-        
-        
-    }   
-    
-    
-    // Since we know we have good voltage, we can use PWM on the LED for now on... 
-        
-    LED_PWM_init();          // Make it so we can pwm the LED for now on...
-                                
-    adc_off();      /// All done with the ADC, so same a bit of power      
-    
-    // TODO: Check battery voltage periodically and shutdown if it goes low durring operation.     
-
-    // Normal operation from here (good battery voltage, not connected to a programmer)
-    
                 
     if (initButton()) {             // Was button down on startup?
                 
@@ -1207,63 +1092,69 @@ int main(void)
 	si4702_init();
     
     // Radio is now on and tuned
-    
-    // I know gotos are forboden in civil society, but can you think of a better way to express this that is not overly baroque?    
-    // If so, please LMK! -josh
-    
-    startBreatheOver:
-    
-    // Breathe for a while so user knows we are alive in case not tuned to a good station or volume too low    
-    
-    for(uint8_t countdown = BREATH_COUNT_TIMEOUT_S ; countdown; countdown-- ) {
         
-        for(uint8_t cycle=0; cycle<(BREATH_CYCLE_LEN); cycle++ ) { 
-                   
-            setLEDBrightness( breath(cycle)  );
-        
-            _delay_ms(20);
-            
-            if (buttonDown()) {
-             
-                handleButtonDown(); 
-                                               
-                goto startBreatheOver;      // Looks nice to have LED start cycle over after button press
-                
-                // I think this is right UX? Breathe lasts 2 mins since last interaction (power on or button press)
-                   
-            }                
-            
-        }        
-                
-    }        
+
+    uint8_t countdown = BREATH_COUNT_TIMEOUT_S;
+
+    uint8_t fadecycle = BREATH_CYCLE_LEN;     
     
-    // LED brightness will always end up at 0  when we stop breathing. 
-        
-                
+       
     while (1) {
         
+        // This loop cycles ever 20ms when we are in breathing LED mode
+        // Thereafter it only cycles once every 8 seconds and the CPU deep sleeps between cycles. 
         
-        // Wake on...
-        //      any button state change (but ignore any but down)
-        //      periodic WDT
-
-
-        // Assume LED off here
+        // Constantly check battery and shutdown if low
         
-        sei();          // Wake on button change interrupt
+        if (lowBatteryCheck()) {
         
-        deepSleep();
+            //shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
         
-        if (buttonDown()) {         // We only care about presses, not lifts            
+        }             
+        
+        if (buttonDown()) {
             
-            handleButtonDown();     // Always wait for the debounced up before returning
-                        
+            handleButtonDown();
+            
+            // Every time the button is pressed we start the breath cycle over
+            
+            countdown = BREATH_COUNT_TIMEOUT_S;
+
+            fadecycle =BREATH_CYCLE_LEN;     
+            
         }            
         
+    
+        // Breathe for a while so user knows we are alive in case not tuned to a good station or volume too low    
+        // Each pass though the while loop in this stage takes about 20ms
+
+    
+        if (countdown) {  
+                                   
+            fadecycle--;
+                       
+            setLEDBrightness( breath(fadecycle)  );
+              
+             _delay_ms(20);  // Can't sleep here becuase that would halt the timer that is PWMing the LED
+                                         
+            if (!fadecycle) {
+                
+                fadecycle=BREATH_CYCLE_LEN;
+                
+                countdown--;
+                
+            }                    
+            
+        } else {        // We are past the initial breathing period
+            
+            sleepFor( HOWLONG_8S );      // Do nothing for a while before checking low battery again (will wake instantly on button press) to save power
+                                         // We actually do not need to check the battery this often, this is just the longest the watchdog timer can sleep for  
+                                         // The CPU only used a few microamps for this 8 seconds, which shoudl help extend battery life. 
+            
+        }            
+                            
     }        
-    
-    
+        
     // Never get here...
-    
-    
+       
 }
