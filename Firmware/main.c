@@ -155,7 +155,12 @@
 #define LONG_PRESS_MS       (2000)      // Hold down button this long for a long press
 #define BUTTON_DEBOUNCE_MS  (50)        // How long to debounce button edges
 
-#define LOW_BATTERY_VOLTAGE (2.1)       // Below this, we will just blink LED and not turn on 
+// We need 
+
+#define LOW_BATTERY_VOLTAGE_COLD (2.1)       // We need to see this at power up to start operation. 
+#define LOW_BATTERY_VOLTAGE_WARM (1.8)       // We need to maintain this voltage to continue operation
+
+// TODO: Empirically figure out optimal values for low battery voltages
 
 #define BREATH_COUNT_TIMEOUT_S (60)       // How many initial breaths should we take before going to sleep? Each breath currently about 2 secs.
 
@@ -639,8 +644,6 @@ static void  copy_factory_param(void)
 }
 
 
-
-
 // Goto bed, will only wake up on button press interrupt (if enabled) or WDT
 
 static void deepSleep(void) {
@@ -699,20 +702,17 @@ static void sleepFor( uint8_t howlong ) {
 
 static void shutDown(uint8_t blinkCount) {
         
-    
-
         // Disable FMIC and AMP
-        SBI( DDRB , FMIC_RESET_BIT);    // drive reset low, makes them sleep            
+        CBI( PORTB , FMIC_RESET_BIT);    // drive reset low, makes them sleep. DDR is set output on start-up and never changed. 
         
-        // TODO: Do this in PMIC? 
         
-        // SHow blink pattern for a while...
+        // Show blink pattern for a while...
                    
         for (uint8_t countdown=DIAGNOSTIC_BLINK_TIMEOUT_S; countdown>0; countdown--) {
             
             for(uint8_t p=blinkCount; p>0; p-- ) {   
                 setLEDBrightness(255);
-                sleepFor( HOWLONG_64MS );           // TODO: What looks best here?
+                _delay_ms(20);
                 setLEDBrightness(0);                
                 sleepFor( HOWLONG_500MS );                
             }
@@ -725,7 +725,8 @@ static void shutDown(uint8_t blinkCount) {
         
         adc_off();
         
-        
+        // TODO: Do this in PMIC? 
+                        
         // TODO: Test how much current actually used here. Can we lower it with peripheral power control register?
         // TODO: Add a MOSFET so we can completely shut them off (they still pull about 25uA in reset)?
         
@@ -912,7 +913,7 @@ static void si4702_init(void)
 
 static void longBlink(void) {
     setLEDBrightness(255);
-    sleepFor( HOWLONG_1S );
+    _delay_ms(1000);
     setLEDBrightness(0);
 }    
 
@@ -971,11 +972,11 @@ static uint8_t initButton(void)
 
 
 
-// Returns 1 if battery too low for operation
+// Returns 1 if battery voltage lower than specified value 
 // Assumes that ADC is on
 
-static uint8_t lowBatteryCheck() {
-  return( !VCC_GT(LOW_BATTERY_VOLTAGE) );  
+static uint8_t lowBatteryCheck( uint8_t voltage ) {
+  return( !VCC_GT( voltage ) );  
 }  
 
 // Assumes button is actually down and LED_Timer is on
@@ -1038,7 +1039,9 @@ int main(void)
         
 	SBI( DDRB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
                                    // Keeps input pin from floating and toggling unnecessarily and wasting power
-                                   
+                                       
+
+    // TODO: Test shutdown current on a new PCB that lets us hold the amp in reset
                                    
     LED_PWM_init();                // Set up the PWM so we can use the LED. Note that the timer does not actually get started until we set the brightness.                                   
                                                                     
@@ -1046,7 +1049,7 @@ int main(void)
         
     // We do a check here before even powering up the FM_IC in case battery is really low, the big draw of the other chips could kill us. 
     
-    if (lowBatteryCheck()) {
+    if (lowBatteryCheck( LOW_BATTERY_VOLTAGE_COLD )) {
         
         shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
         
@@ -1093,7 +1096,6 @@ int main(void)
     
     // Radio is now on and tuned
         
-
     uint8_t countdown = BREATH_COUNT_TIMEOUT_S;
 
     uint8_t fadecycle = BREATH_CYCLE_LEN;     
@@ -1106,9 +1108,9 @@ int main(void)
         
         // Constantly check battery and shutdown if low
         
-        if (lowBatteryCheck()) {
+        if (lowBatteryCheck( LOW_BATTERY_VOLTAGE_WARM )) {
         
-            //shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
+            shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
         
         }             
         
