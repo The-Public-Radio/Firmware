@@ -155,7 +155,6 @@
 #define LONG_PRESS_MS       (2000)      // Hold down button this long for a long press
 #define BUTTON_DEBOUNCE_MS  (50)        // How long to debounce button edges
 
-// We need 
 
 #define LOW_BATTERY_VOLTAGE_COLD (2.1)       // We need to see this at power up to start operation. 
 #define LOW_BATTERY_VOLTAGE_WARM (1.8)       // We need to maintain this voltage to continue operation
@@ -345,9 +344,9 @@ static void updateLEDcompensation(void) {
 
 static void setLEDBrightness( uint8_t newBrightness ) {   
      
-    //OCR1B = MIN((newBrightness)/16,8);            //TODO:this is a hack, fix the lookup table to have correct values
+    OCR1B = MIN((newBrightness)/16,8);            //TODO:this is a hack, fix the lookup table to have correct values
     
-    OCR1B = newBrightness;            //TODO:this is a hack, fix the lookup table to have correct values
+    //OCR1B = newBrightness;            //TODO:this is a hack, fix the lookup table to have correct values
         
     if ( newBrightness ) {              // faster to always blindly enable rather than test previous value
         LED_PWM_on();                   // Also forces the new brightness to take effect immediately - although not visible to human eye
