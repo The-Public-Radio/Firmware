@@ -219,6 +219,9 @@ typedef enum {
 
 #define REG_04_DE_BIT       11          // Deemphasis
 
+#define REG_07_XOSCEN       15          // Enable crystal oscillator
+#define REG_07_AHIZEN       14          // Audio high-Z enable
+
 
 #define EEPROM_BAND		    ((const uint8_t *)0)
 #define EEPROM_DEEMPHASIS	((const uint8_t *)1)
