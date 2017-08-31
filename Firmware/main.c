@@ -212,9 +212,9 @@ typedef enum {
 #define REG_02_SKMODE           10          // 0 = Wrap at the upper or lower band limit and continue seeking (default). 1 = Stop seeking at the upper or lower band limit.
 #define REG_02_SEEKUP_BIT        9          // 0 = Seek down (default). 1 = Seek up.
 #define REG_02__SEEK             8          // This is a command. 1 = Enable. A seek operation may be aborted by setting SEEK = 0.
-#define REG_02_ENABLE_BIT        1          // Power up enable
+#define REG_02_ENABLE_BIT        0          // Power up enable
 
-#define REG_02_DEFAULT       (_BV(REG_02_DMUTE_BIT) | (REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) | _BV(REG_02_SEEKUP_BIT) )       // Sensible values we want at startup and when seeking
+#define REG_02_DEFAULT ( _BV( REG_02_DMUTE_BIT) |  _BV(REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) | _BV(REG_02_SEEKUP_BIT) )    // USed mostly when setting and clearing seek bit
 
 
 #define REG_04_DE_BIT       11          // Deemphasis
@@ -580,13 +580,13 @@ static void seekNext(void) {
         before the next seek or tune may begin/"        
         */
                 
-                
+                                
     set_shadow_reg(REGISTER_02, REG_02_DEFAULT  );            
     
     si4702_write_registers( REGISTER_02 );
     
     // Empirically determined that we need this delay.
-    // We we follow the stop with a stary immmedetaly, it does not work. 
+    // We we follow the stop with a start immediately, it does not work. 
     // 1ms was the 1st guess and it worked. 
    
     
@@ -809,20 +809,17 @@ static void si4702_init(void)
         Set the ENABLE bit high and the DISABLE bit low to
         powerup the device.    
         
+        We leave mute on here so we don't hear static in the time between when the chip actually comes up
+        and when we can get the seek in.
+        
     */
-           
-    // Note that if we unmute here, we get a "click" before the radio tunes 
+               
+    set_shadow_reg(REGISTER_02, _BV( REG_02_ENABLE_BIT ) );    // Enable chip 
 
-    // Ok folks, likes like you *must* enable RDS in "Verbose" mode here or else 
-    // some silicon (seems like older) will sometimes (not everytime) come up in a weird mode with a 
-    // hum over the audio. WTF Si?
-       
-    
-    // set_shadow_reg(REGISTER_02, 0x4001 );                
+    // OK, CLICK DEFINATELY HAPPENS ON THIS ENABLE ACTION!!!!
 
+	si4702_write_registers( REGISTER_02 );
 
-
-    set_shadow_reg(REGISTER_02, _BV( REG_02_ENABLE_BIT ) );    // Enable (do not disable mute yet)             
        
 	/*
 	 * Set radio params based on eeprom...
@@ -837,7 +834,7 @@ static void si4702_init(void)
 			(((uint16_t)(eeprom_read_byte(EEPROM_SPACING) & 0x03)) << 4) |
             (((uint16_t)(eeprom_read_byte(EEPROM_VOLUME) & 0x0f)))           
     );
-    
+
     
 	/*
 	 * Set the seek SNR and impulse detection thresholds.
@@ -880,27 +877,20 @@ static void si4702_init(void)
     
     //uint16_t chan = 0x0040;                                  // test with z100.
     //uint16_t chan = 0x0044;                                  // Test with  - cbs 101 fm
-        
+          
 	set_shadow_reg(REGISTER_03, 0x8000 |  chan );
 
 	si4702_write_registers( REGISTER_03 );
+
+
     
-    /*   
-        Seek/Tune Time8,11 SPACE[1:0] = 0x, RCLK
-        tolerance = 200 ppm, (x = 0 or 1)
-        60 ms/channel
-        
-   */
+    // Ok, we should be all set up and tuned here, but still muted. 
+           
+    // Disable mute, set mono, seek up!
     
-    // THis appears to be where the click happens. 
-    // If this is 60ms, then we hear the station tune, then lick, then station again.
-    // More where needed here. 
+    set_shadow_reg(REGISTER_02,  REG_02_DEFAULT );       
     
-    // Even though only 60ms spec'ed, if we don't wait for 100ms before unmute then we hear a a blink of music before the pop. Arg. 
-   // _delay_ms(100);
-    
-    // We should be all tuned up and ready to go when we get here, so setup auto and unmute and let the music play!
-    set_shadow_reg(REGISTER_02, REG_02_DEFAULT );  
+    si4702_write_registers( REGISTER_02 );
 
     // TODO: Play with this more. Can we get rid of the click here?    
 
