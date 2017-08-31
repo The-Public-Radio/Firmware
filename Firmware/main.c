@@ -816,8 +816,13 @@ static void si4702_init(void)
     // Ok folks, likes like you *must* enable RDS in "Verbose" mode here or else 
     // some silicon (seems like older) will sometimes (not everytime) come up in a weird mode with a 
     // hum over the audio. WTF Si?
+       
     
-    set_shadow_reg(REGISTER_02, 0x4001 );                
+    // set_shadow_reg(REGISTER_02, 0x4001 );                
+
+
+
+    set_shadow_reg(REGISTER_02, _BV( REG_02_ENABLE_BIT ) );    // Enable (do not disable mute yet)             
        
 	/*
 	 * Set radio params based on eeprom...
@@ -838,7 +843,7 @@ static void si4702_init(void)
 	 * Set the seek SNR and impulse detection thresholds.
 	 */
     
-    // We are writing up to REGISTER_05 soon anyway, sind as well set 06 here too while we are up there
+    // We are writing up to REGISTER_05 soon anyway, mind as well set 06 here too while we are up there
     // even though we may never need these set (only used if user presses button to seek)
     
 	set_shadow_reg(REGISTER_06,
@@ -866,7 +871,8 @@ static void si4702_init(void)
     */    
     
     // This was 110ms as per spec, but caused a minority of units to come up
-    // tuned to static. 200ms next guess, seems to cure problem on unit tested. 
+    // tuned to static. WTF Si?
+    // 200ms next guess, seems to cure problem on unit tested. 
     
     _delay_ms(200); 
               
