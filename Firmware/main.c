@@ -865,7 +865,10 @@ static void si4702_init(void)
           
     */    
     
-    _delay_ms(110); 
+    // This was 110ms as per spec, but caused a minority of units to come up
+    // tuned to static. 200ms next guess, seems to cure problem on unit tested. 
+    
+    _delay_ms(200); 
               
     uint16_t chan = eeprom_read_word(EEPROM_CHANNEL);       // Assumes this does not have bit 15 set. 
     
