@@ -18,7 +18,7 @@ Install two AA batteries.
 
 Turn the knob clockwise until it clicks to turn on. Turn more clockwise makes it louder.
 
-You should hear your programmed station. If not, see troubleshooting below.   
+You should hear your programmed station and see LED breathing. If not, see troubleshooting below.   
 
 Turn the knob counter clockwise until clicks to turn off. 
 
@@ -27,7 +27,7 @@ Turn the knob counter clockwise until clicks to turn off.
 If you don't hear anything, check the LED. 
 
 * If it is flashing two quick blinks every second, then your batteries are too low. replace them.
-*  If it is flashing three quick blinks every second, then your EEPROM is corrupt. This is very unlikely, so we want to talk to you!
+* If it is flashing three quick blinks every second, then your EEPROM is corrupt. This is very unlikely, so we want to talk to you!
 * If you see nothing, then the batteries are dead or not installed. Fix that.
 * If it is breathing, then either...
     * The volume is turned too low. Make it louder
@@ -38,9 +38,9 @@ If you don't hear anything, check the LED.
 
 Press and release the button until you find a new station that you like.  
 
-To save the currently playing station as the new turn-on default, press and hold the button for about 2 seconds. You should see the LED blink blink on for about 1/2 a second telling you the save worked. Now that station will play the next time you turn on.
+To save the currently playing station as the new turn-on default, press and hold the button for about 2 seconds. You should see the LED blink on for about 1/2 a second telling you the save worked. Now that station will play the next time you turn on.
 
-If you want to go back to the station your unit was programmed with when you got it, turn it off and then hold down the button while you turn it back on. Once it is on, release the button to restore the configuration (if you turn power off before releasing, then the initial configuration will not be saved).  You should see a 1/2 second flash indication the restore worked, and then the TPR shooudl start playing your original factory programmed station. 
+If you want to go back to the station your unit was programmed with when you got it, turn it off and then hold down the button while you turn it back on. Once it is on, release the button to restore the configuration (if you turn power off before releasing, then the initial configuration will not be saved).  You should see a 1/2 second flash indication that the restore worked, and then the TPR should start playing your original factory programmed station. 
 
 
 ## User interface
@@ -53,9 +53,22 @@ There are three user interaction elements...
 
 When the knob is in the off position, the unit is unpowered. When the knob is on, adjusts the volume on the speaker.
 
-### Low battery indication
+Durring normal operation, the LED will "breathe" at about 1Hz to give feedback that the unit is powered up and running. This will contuine for about 2 minutes after the last interaction (either a power up or  button push).
 
-On power up, if the battery voltage is too low for operation, the LED will short blink (about 100ms) twice  about once per second. This blink pattern will repeat once per second for about 2 minutes and then the unit will go into deep sleep. If this happens, replace the batteries with fresh ones. 
+### LED error indications
+
+* 2 short blinks repeat every second -  Battery Too Low for Operation
+
+Can occur at startup or durring operation.  Unit will stop blinking and go into deep sleep after about 2 minutes.
+
+* 3 short blinks every second - Corrupt EEPROM checksum
+
+Can only occur at startup. Unit will stop blinking and go into deep sleep after about 2 minutes.
+
+
+### Low battery threshold voltages 
+
+There are two low battery voltage thresholds - one for cold power up before audio has started playing, and a lower one for after audio has startred. This is to account for the lower battery voltage caused by the large current draw of the amplifier. 
 
 ### User configuration
 
