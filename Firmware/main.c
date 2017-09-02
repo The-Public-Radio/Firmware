@@ -157,7 +157,7 @@
 
 
 #define LOW_BATTERY_VOLTAGE_COLD (2.1)       // We need to see this at power up to start operation. 
-#define LOW_BATTERY_VOLTAGE_WARM (1.8)       // We need to maintain this voltage to continue operation
+#define LOW_BATTERY_VOLTAGE_WARM (2.0)       // We need to maintain this voltage to continue operation
 
 // TODO: Empirically figure out optimal values for low battery voltages
 
@@ -794,7 +794,10 @@ static void si4702_init(void)
     // Note that Sparkfun library also does it this way, so should be ok. 
     // https://github.com/sparkfun/Si4703_FM_Tuner_Evaluation_Board/blob/V_H1.3_L1.2.0/Libraries/Arduino/src/SparkFunSi4703.cpp#L133
 
-	set_shadow_reg(REGISTER_07, 0x8100);
+    // Tested and setting AHIZEN here has no effect on enable click. 
+    // Tested setting 07 to XOSCEND | 0x3c04 and chip does not function. 
+
+	set_shadow_reg(REGISTER_07, 0x8100 );
 
 	si4702_write_registers(REGISTER_07);
     
@@ -976,7 +979,7 @@ static uint8_t initButton(void)
 // Returns 1 if battery voltage lower than specified value 
 // Assumes that ADC is on
 
-static uint8_t lowBatteryCheck( uint8_t voltage ) {
+static uint8_t batteryLowerThan( uint8_t voltage ) {
   return( !VCC_GT( voltage ) );  
 }  
 
@@ -1022,6 +1025,9 @@ static void handleButtonDown(void) {
                 
                 
         while (buttonDown());           // Wait for them to finally release the button- hopefully after seeing the confirmation long blink
+                                        // Note that we are not checking for low battery voltage here. This means that a malicious user could
+                                        // hold down the button for a few years and cause the battery to blister. Might need to add a warning sticker
+                                        // above button saying "HOLDING BUTTON DOWN FOR MORE THAN 1 YEAR MAY CCAUSE BATTERY DAMAGE"
                            
     }    
 
@@ -1050,12 +1056,12 @@ int main(void)
         
     // We do a check here before even powering up the FM_IC in case battery is really low, the big draw of the other chips could kill us. 
     
-    if (lowBatteryCheck( LOW_BATTERY_VOLTAGE_COLD )) {
+    if (batteryLowerThan( LOW_BATTERY_VOLTAGE_COLD )) {
         
         shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
         
     }        
-        
+    
                 
     if (initButton()) {             // Was button down on startup?
                 
@@ -1109,7 +1115,8 @@ int main(void)
         
         // Constantly check battery and shutdown if low
         
-        if (lowBatteryCheck( LOW_BATTERY_VOLTAGE_WARM )) {
+        
+        if (batteryLowerThan( LOW_BATTERY_VOLTAGE_WARM )) {
         
             shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
         
