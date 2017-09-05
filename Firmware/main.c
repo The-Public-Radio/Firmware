@@ -161,7 +161,7 @@
 
 // TODO: Empirically figure out optimal values for low battery voltages
 
-#define BREATH_COUNT_TIMEOUT_S (60)       // How many initial breaths should we take before going to sleep? Each breath currently about 2 secs.
+#define BREATH_COUNT (5)       // How many initial breaths should we display? Resets on startup and after each button press. Each breath currently about 2 secs.
 
 // These are the error display codes
 // When we run into problems, we blink the LED this many times to show the user
@@ -332,15 +332,6 @@ static inline void LED_PWM_off(void) {
 
 static uint8_t currentLEDBrightness=0;
 
-static void updateLEDcompensation(void) {
-
-    if (currentLEDBrightness>0) {
-        OCR1B = currentLEDBrightness;
-        // TODO: Do voltage adjust        
-    }    
-}    
-
-
 #define MIN(a,b) (((a)<(b))?(a):(b))
 
 // 0=off, 255-brightest. Normalized for voltage.   
@@ -488,11 +479,20 @@ void debugBlinkByte( uint8_t data ) {
 #define SEEK_IMPULSE_THRESHOLD	(4)
 
 
+
+
 /*
  * tune_direct() -	Directly tune to the specified channel.
  * Assumes chan < 0x01ff
+ * Unneeded in current embodiment since we only use seek to change channels after startup
+ 
  */
-static void tune_direct(uint16_t chan)
+
+
+
+
+static void __attribute__ ((unused))   tune_direct(uint16_t chan)         //  Unneeded in current embodiment since we only use seek to change channels after startup
+
 {
 
 	set_shadow_reg(REGISTER_03, 0x8000 | chan );
@@ -510,6 +510,8 @@ static void tune_direct(uint16_t chan)
 	set_shadow_reg(REGISTER_03,  chan );
 	si4702_write_registers( REGISTER_03 );
 }
+
+
 
 /*
  * update_channel() -	Update the channel stored in the working params.
@@ -1103,11 +1105,10 @@ int main(void)
     
     // Radio is now on and tuned
         
-    uint8_t countdown = BREATH_COUNT_TIMEOUT_S;
+    uint8_t breathCountdown = BREATH_COUNT;         // Count down breaths displayed. When this gets to 0, stop showing breath unitl a button push resets count
 
-    uint8_t fadecycle = BREATH_CYCLE_LEN;     
-    
-       
+    uint8_t fadecycle = BREATH_CYCLE_LEN;           // Where in the breath cycle are we now
+           
     while (1) {
         
         // This loop cycles ever 20ms when we are in breathing LED mode
@@ -1128,7 +1129,7 @@ int main(void)
             
             // Every time the button is pressed we start the breath cycle over
             
-            countdown = BREATH_COUNT_TIMEOUT_S;
+            breathCountdown = BREATH_COUNT;
 
             fadecycle =BREATH_CYCLE_LEN;     
             
@@ -1139,19 +1140,20 @@ int main(void)
         // Each pass though the while loop in this stage takes about 20ms
 
     
-        if (countdown) {  
+        if (breathCountdown) {  
                                    
             fadecycle--;
                        
             setLEDBrightness( breath(fadecycle)  );
               
-             _delay_ms(20);  // Can't sleep here becuase that would halt the timer that is PWMing the LED
+             _delay_ms(20);  // Emperical delay here lets this brightrness actuall go though a PWM cycle and be visible on the LED
+                             // Can't sleep here because that would halt the timer that is PWMing the LED
                                          
             if (!fadecycle) {
                 
                 fadecycle=BREATH_CYCLE_LEN;
                 
-                countdown--;
+                breathCountdown--;
                 
             }                    
             
