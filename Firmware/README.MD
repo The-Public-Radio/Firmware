@@ -53,7 +53,7 @@ There are three user interaction elements...
 
 When the knob is in the off position, the unit is unpowered. When the knob is on, adjusts the volume on the speaker.
 
-Durring normal operation, the LED will "breathe" at about 1Hz to give feedback that the unit is powered up and running. This will contuine for about 2 minutes after the last interaction (either a power up or  button push).
+Durring normal operation, the LED will "breathe" at about 1Hz to give feedback that the unit is powered up and running. This will contuine for 5 breath cycles minutes after the last interaction (either a power up or  button push).
 
 ### LED error indications
 
