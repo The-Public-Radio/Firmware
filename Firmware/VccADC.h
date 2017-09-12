@@ -39,6 +39,9 @@ void adc_off(void);
 
 uint16_t readADC(void);
 
+// This macro gives you the current Vcc voltage for a given ADC value returned from readADC()
+
+#define ADC2VCC(a) ( (1.1*1023) / a )
 
 // This macro will give you the value returned from the ADC for a Vcc voltage of V
 // Nice to have in a macro because for fixed voltages, you can precompute 
@@ -46,10 +49,10 @@ uint16_t readADC(void);
 
 // Vcc   =  (1.1v * 1024) / ADC
 
-#define VCC2A(v) ((uint16_t) ((1.1*1023.0)/v))
+#define VCC2ADC(v) ((uint16_t) ((1.1*1023.0)/v))
 
 
 // This macro tests if the current Vcc is currently above the specified voltage
 
-#define VCC_GT(v) (readADC()<=VCC2A(v))      // returns true if the ADC is higher than V
+#define VCC_GT(v) (readADC()<=VCC2ADC(v))      // returns true if the ADC is higher than V
 

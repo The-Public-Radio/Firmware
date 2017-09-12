@@ -1038,8 +1038,47 @@ static void handleButtonDown(void) {
 }
 
 
-int main(void)
-{
+// Blink out the current voltage on the LED for debugging
+// volts...500ms...tenths of volts....1s...repeat
+
+static void debugBlinkVoltage(void) {
+    
+    while (1) {
+    
+        uint8_t Vcc = ADC2VCC( readADC() ) * 10.0;        // Vcc now *10, so 30 = 3.0v
+        
+        uint8_t VccT = Vcc/10;          // Break out high and low digits
+        
+        while (VccT--) {
+            
+            setLEDBrightness(255);
+            _delay_ms(200);
+            setLEDBrightness(0);
+            _delay_ms(200);           
+        }            
+        
+        _delay_ms(400);     // Break between high and low digits
+        
+        uint8_t VccB = Vcc%10;
+        
+        while (VccB--) {
+            
+            setLEDBrightness(255);
+            _delay_ms(200);
+            setLEDBrightness(0);
+            _delay_ms(200);
+        }
+        
+        _delay_ms(1000);        // Break between readings
+        
+    
+    }    
+    
+}    
+
+
+int main(void) {
+
     
     // Set up the reset line to the FM_IC and AMP first so they are quiet. 
     // This eliminates the need for the external pull-down on this line. 
@@ -1055,6 +1094,9 @@ int main(void)
     LED_PWM_init();                // Set up the PWM so we can use the LED. Note that the timer does not actually get started until we set the brightness.                                   
                                                                     
     adc_on();
+    
+    #warning diagnostics
+    debugBlinkVoltage();
         
     // We do a check here before even powering up the FM_IC in case battery is really low, the big draw of the other chips could kill us. 
     
