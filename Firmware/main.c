@@ -157,7 +157,8 @@
 
 
 #define LOW_BATTERY_VOLTAGE_COLD (2.1)       // We need to see this at power up to start operation. 
-#define LOW_BATTERY_VOLTAGE_WARM (2.0)       // We need to maintain this voltage to continue operation
+#define LOW_BATTERY_VOLTAGE_WARM (1.7)       // If we get this low, we are not working anymore so user accedentally 
+                                             // left power on. We should down to avoid battery blistering
 
 // TODO: Empirically figure out optimal values for low battery voltages
 
@@ -214,7 +215,7 @@ typedef enum {
 #define REG_02__SEEK             8          // This is a command. 1 = Enable. A seek operation may be aborted by setting SEEK = 0.
 #define REG_02_ENABLE_BIT        0          // Power up enable
 
-#define REG_02_DEFAULT ( _BV( REG_02_DMUTE_BIT) |  _BV(REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) | _BV(REG_02_SEEKUP_BIT) )    // USed mostly when setting and clearing seek bit
+#define REG_02_DEFAULT ( _BV( REG_02_DMUTE_BIT) |  _BV(REG_02_MONO_BIT) | _BV(REG_02_ENABLE_BIT) | _BV(REG_02_SEEKUP_BIT) )    // Used mostly when setting and clearing seek bit
 
 
 #define REG_04_DE_BIT       11          // Deemphasis
@@ -481,36 +482,6 @@ void debugBlinkByte( uint8_t data ) {
 
 
 
-/*
- * tune_direct() -	Directly tune to the specified channel.
- * Assumes chan < 0x01ff
- * Unneeded in current embodiment since we only use seek to change channels after startup
- 
- */
-
-
-
-
-static void __attribute__ ((unused))   tune_direct(uint16_t chan)         //  Unneeded in current embodiment since we only use seek to change channels after startup
-
-{
-
-	set_shadow_reg(REGISTER_03, 0x8000 | chan );
-
-	si4702_write_registers( REGISTER_03 );
-	_delay_ms(160);
-
-    /*
-        The tune operation begins when the TUNE bit is set high. The STC bit is set high
-        when the tune operation completes. The STC bit must be set low by setting the TUNE
-        bit low before the next tune or seek may begin.
-    */
-
-    // Clear the tune bit here so chip will be ready to tune again if user presses the button.
-	set_shadow_reg(REGISTER_03,  chan );
-	si4702_write_registers( REGISTER_03 );
-}
-
 
 
 /*
@@ -772,14 +743,6 @@ static void si4702_init(void)
     // state.
     
    
-
-    // Drive SDIO low (GPIO3 will be pulled low internally by the FM_IC) 
-                
-    SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
-                                       // The direct bit was set to output when we first started in main()
-        
-    _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
-                                       // high) does not occur within 300 ns before the rising edge of RST.
    
                                            
     // Enable the pull-ups on the TWI lines
@@ -812,6 +775,14 @@ static void si4702_init(void)
     */
 
 	_delay_ms(500);
+    
+}
+
+// We break out init() and enable() into different functions so we can check the battery voltage 
+// After the 550ms delay after startup.     
+    
+static void si4702_enable(void) {
+    
 
     /*    
         Set the ENABLE bit high and the DISABLE bit low to
@@ -822,7 +793,11 @@ static void si4702_init(void)
         
     */
                
-    set_shadow_reg(REGISTER_02, _BV( REG_02_ENABLE_BIT ) );    // Enable chip 
+//    set_shadow_reg(REGISTER_02, _BV( REG_02_DSMUTE_BIT ) |  _BV( REG_02_ENABLE_BIT ) );    // Setting DSMUTE here doesnt help with click
+
+
+    set_shadow_reg(REGISTER_02,  _BV( REG_02_ENABLE_BIT ) );    // Enable chip
+
 
     // OK, CLICK DEFINATELY HAPPENS ON THIS ENABLE ACTION!!!!
 
@@ -878,10 +853,21 @@ static void si4702_init(void)
     // This was 110ms as per spec, but caused a minority of units to come up
     // tuned to static. WTF Si?
     // 200ms next guess, seems to cure problem on unit tested. 
-    
+    // TODO: Maybe try polling the chip to see exactly when it wakes up to shorten this?
+        
     _delay_ms(200); 
-              
-    uint16_t chan = eeprom_read_word(EEPROM_CHANNEL);       // Assumes this does not have bit 15 set. 
+    
+}
+
+/*
+ * tune_direct() -	Directly tune to the specified channel.
+ * Assumes chan < 0x01ff
+ * Unneeded in current embodiment since we only use seek to change channels after startup
+ 
+ */
+
+static void si4702_tune(uint16_t chan)   {
+                  
     
     //uint16_t chan = 0x0040;                                  // test with z100.
     //uint16_t chan = 0x0044;                                  // Test with  - cbs 101 fm
@@ -889,8 +875,6 @@ static void si4702_init(void)
 	set_shadow_reg(REGISTER_03, 0x8000 |  chan );
 
 	si4702_write_registers( REGISTER_03 );
-
-
     
     // Ok, we should be all set up and tuned here, but still muted. 
            
@@ -914,6 +898,29 @@ static void si4702_init(void)
 	si4702_write_registers( REGISTER_03 );
         
 }
+
+
+
+
+
+/*
+
+Old tunedirect()
+
+{
+
+	set_shadow_reg(REGISTER_03, 0x8000 | chan );
+
+	si4702_write_registers( REGISTER_03 );
+	_delay_ms(160);
+
+    
+    // Clear the tune bit here so chip will be ready to tune again if user presses the button.
+	set_shadow_reg(REGISTER_03,  chan );
+	si4702_write_registers( REGISTER_03 );
+}
+
+*/
 
 // Blink  1 second
 
@@ -1088,25 +1095,12 @@ int main(void) {
 	SBI( DDRB , LED_DRIVE_BIT);    // Set LED pin to output, will default to low (LED off) on startup
                                    // Keeps input pin from floating and toggling unnecessarily and wasting power
                                        
+    _delay_ms(50);                 // Debounce the on switch
 
     // TODO: Test shutdown current on a new PCB that lets us hold the amp in reset
                                    
     LED_PWM_init();                // Set up the PWM so we can use the LED. Note that the timer does not actually get started until we set the brightness.                                   
-                                                                    
-    adc_on();
-    
-    #warning diagnostics
-    debugBlinkVoltage();
-        
-    // We do a check here before even powering up the FM_IC in case battery is really low, the big draw of the other chips could kill us. 
-    
-    if (batteryLowerThan( LOW_BATTERY_VOLTAGE_COLD )) {
-        
-        shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
-        
-    }        
-    
-                
+                                                                                       
     if (initButton()) {             // Was button down on startup?
                 
         // TODO: How should this work?
@@ -1141,9 +1135,37 @@ int main(void) {
         shutDown( DIAGNOSTIC_BLINK_BADEEPROM );
         
     }        
-
+    
+        
+    SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
+                                       // The bit direction was set to output when we first started in main()
+    
+    _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
+                                       // high) does not occur within 300 ns before the rising edge of RST.
+    
+    
     
 	si4702_init();
+    
+    // We do a check here because init on FM_IC takes 500ms, so by the time we get here
+    // power has stabilized but we do want to check before the amp starts playing music. 
+
+    adc_on();
+        
+    if (batteryLowerThan( LOW_BATTERY_VOLTAGE_COLD )) {
+        
+        shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
+        
+    }
+    
+        
+    si4702_enable();            // Finish bringing up the FM_IC (it will still be muted)
+    
+    uint16_t chan = eeprom_read_word(EEPROM_CHANNEL);       // Assumes this does not have bit 15 set.
+
+    si4702_tune( chan );        // Tune up the programmed station and start playing
+    
+        
     
     // Radio is now on and tuned
         
@@ -1158,8 +1180,7 @@ int main(void) {
         
         // Constantly check battery and shutdown if low
         
-        
-        if (batteryLowerThan( LOW_BATTERY_VOLTAGE_WARM )) {
+        if  (batteryLowerThan( LOW_BATTERY_VOLTAGE_WARM )) {
         
             shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
         
