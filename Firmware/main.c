@@ -156,9 +156,13 @@
 #define BUTTON_DEBOUNCE_MS  (50)        // How long to debounce button edges
 
 
-#define LOW_BATTERY_VOLTAGE_COLD (2.1)       // We need to see this at power up to start operation. 
-#define LOW_BATTERY_VOLTAGE_WARM (1.85)       // If we get this low, we are not working anymore so user accidentally 
-                                             // left power on. We should down to avoid battery blistering
+#define LOW_BATTERY_VOLTAGE_COLD (2.1)          // We need to see this at power up to start operation. 
+#define LOW_BATTERY_VOLTAGE_WARM (1.80)         // If we get this low, we are not working anymore so user accidentally 
+                                                // left power on. We should down to avoid battery blistering
+                                             
+#define LOW_BATTERY_VOLTAGE_WARM_COUNT  10      // We need to see this many consecutive low battery voltage readings before shutting down
+                                                // this prevents us from shutting down based on seeing one sample that might have happened 
+                                                // right when the amp was pulling a spike of current. 
 
 // TODO: Empirically figure out optimal values for low battery voltages
 
@@ -1162,6 +1166,8 @@ int main(void) {
     uint8_t breathCountdown = BREATH_COUNT;         // Count down breaths displayed. When this gets to 0, stop showing breath unitl a button push resets count
 
     uint8_t fadecycle = BREATH_CYCLE_LEN;           // Where in the breath cycle are we now
+    
+    uint8_t warm_low_count=0;                       // How many times in a row has the warm voltage been too low?
            
     while (1) {
         
@@ -1173,10 +1179,26 @@ int main(void) {
         //debugBlinkVoltage();
         
         if  (VCC_LESS_THAN( LOW_BATTERY_VOLTAGE_WARM )) {
+                        
+            warm_low_count++;
+            
+            if (warm_low_count>=LOW_BATTERY_VOLTAGE_WARM_COUNT) {
+                
+                // Only shutdown if we see a consecutive series of low voltage samples to avoid
+                // false alarm due to temp low voltage from a current spike. 
+                shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
+                
+            }                
         
-            shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
+        } else {
+            
+            // If we see even one good voltage sample, then we start counting over again
+            // this helps make sure the battery is really low before we shut down
+            
+            warm_low_count=0;
+            
+        }                         
         
-        }             
         
         
         if (buttonDown()) {

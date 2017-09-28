@@ -59,3 +59,4 @@ uint16_t readADC(void);
 // Note that this is a macro so the floating point math in VCC2ADC can be evaluated statically
 // when V is const, which it should be. 
 
+#define VCC_LESS_THAN(v) (readADC()>VCC2ADC(v))      // returns true if the Measured Vcc is than V
