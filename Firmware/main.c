@@ -157,7 +157,7 @@
 
 
 #define LOW_BATTERY_VOLTAGE_COLD (2.1)       // We need to see this at power up to start operation. 
-#define LOW_BATTERY_VOLTAGE_WARM (1.7)       // If we get this low, we are not working anymore so user accedentally 
+#define LOW_BATTERY_VOLTAGE_WARM (1.85)       // If we get this low, we are not working anymore so user accidentally 
                                              // left power on. We should down to avoid battery blistering
 
 // TODO: Empirically figure out optimal values for low battery voltages
@@ -171,7 +171,7 @@
 #define DIAGNOSTIC_BLINK_BADEEPROM     3            // EEPROM user settings failed CRC check on startup
 #define DIAGNOSTIC_BLINK_LOWBATTERY    2            // Battery too low for operation. 
 
-#define  DIAGNOSTIC_BLINK_TIMEOUT_S   120           // Show diagnostic blink at least this long before going to sleep
+#define DIAGNOSTIC_BLINK_TIMEOUT_S   120            // Show diagnostic blink at least this long before going to sleep
                                                     // Give user time to see it, but don't go too long because we will
 
                                                     // make crusty batteries. Must fit in unit8_t.
@@ -438,7 +438,7 @@ static void si4702_write_registers(unsigned upto_reg)
 
 // Blink a byte out pin 2 (normally button)
 
-void debugBlinkByte( uint8_t data ) {
+void __attribute__ ((unused)) debugBlinkByte( uint8_t data ) {
 
     CBI( PORTB , PB3 );    // TODO: TESTING
     SBI( DDRB , PB3 );// TODO: TESTING
@@ -900,9 +900,6 @@ static void si4702_tune(uint16_t chan)   {
 }
 
 
-
-
-
 /*
 
 Old tunedirect()
@@ -984,14 +981,6 @@ static uint8_t initButton(void)
 
 
 
-
-// Returns 1 if battery voltage lower than specified value 
-// Assumes that ADC is on
-
-static uint8_t batteryLowerThan( uint8_t voltage ) {
-  return( !VCC_GT( voltage ) );  
-}  
-
 // Assumes button is actually down and LED_Timer is on
 // Always waits for the debounced up before returning
 // Call from main assumes that LED will be off when this returns
@@ -1045,42 +1034,38 @@ static void handleButtonDown(void) {
 }
 
 
+static void debugBlinkDigit(uint8_t c) {
+    
+    while (c--) {
+        
+        setLEDBrightness(255);
+        _delay_ms(200);
+        setLEDBrightness(0);
+        _delay_ms(200);
+    }
+    
+    _delay_ms(400);     // Break between high and low digits
+    
+        
+}    
+
 // Blink out the current voltage on the LED for debugging
 // volts...500ms...tenths of volts....1s...repeat
 
-static void debugBlinkVoltage(void) {
+static void __attribute__ ((unused)) debugBlinkVoltage(void) {
     
-    while (1) {
     
-        uint8_t Vcc = ADC2VCC( readADC() ) * 10.0;        // Vcc now *10, so 30 = 3.0v
+    uint8_t Vcc = ADC2VCC( readADC() ) * 10.0;        // Vcc now *10, so 30 = 3.0v
         
-        uint8_t VccT = Vcc/10;          // Break out high and low digits
-        
-        while (VccT--) {
-            
-            setLEDBrightness(255);
-            _delay_ms(200);
-            setLEDBrightness(0);
-            _delay_ms(200);           
-        }            
-        
-        _delay_ms(400);     // Break between high and low digits
-        
-        uint8_t VccB = Vcc%10;
-        
-        while (VccB--) {
-            
-            setLEDBrightness(255);
-            _delay_ms(200);
-            setLEDBrightness(0);
-            _delay_ms(200);
-        }
-        
-        _delay_ms(1000);        // Break between readings
-        
+    uint8_t VccT = Vcc/10;          // Break out high and low digits
     
-    }    
+    debugBlinkDigit( VccT );
+    uint8_t VccB = Vcc%10;
+        
+    debugBlinkDigit(VccB);
     
+    _delay_ms(1000);        // Break between readings
+                
 }    
 
 
@@ -1096,10 +1081,14 @@ int main(void) {
                                    // Keeps input pin from floating and toggling unnecessarily and wasting power
                                        
     _delay_ms(50);                 // Debounce the on switch
-
+    
+    
     // TODO: Test shutdown current on a new PCB that lets us hold the amp in reset
                                    
     LED_PWM_init();                // Set up the PWM so we can use the LED. Note that the timer does not actually get started until we set the brightness.                                   
+  
+
+
                                                                                        
     if (initButton()) {             // Was button down on startup?
                 
@@ -1151,8 +1140,9 @@ int main(void) {
     // power has stabilized but we do want to check before the amp starts playing music. 
 
     adc_on();
+
         
-    if (batteryLowerThan( LOW_BATTERY_VOLTAGE_COLD )) {
+    if (VCC_LESS_THAN( LOW_BATTERY_VOLTAGE_COLD )) {
         
         shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
         
@@ -1175,16 +1165,19 @@ int main(void) {
            
     while (1) {
         
-        // This loop cycles ever 20ms when we are in breathing LED mode
+        // This loop cycles every 20ms when we are in breathing LED mode
         // Thereafter it only cycles once every 8 seconds and the CPU deep sleeps between cycles. 
         
         // Constantly check battery and shutdown if low
         
-        if  (batteryLowerThan( LOW_BATTERY_VOLTAGE_WARM )) {
+        //debugBlinkVoltage();
+        
+        if  (VCC_LESS_THAN( LOW_BATTERY_VOLTAGE_WARM )) {
         
             shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
         
         }             
+        
         
         if (buttonDown()) {
             
@@ -1219,14 +1212,15 @@ int main(void) {
                 breathCountdown--;
                 
             }                    
-            
+         
         } else {        // We are past the initial breathing period
             
             sleepFor( HOWLONG_8S );      // Do nothing for a while before checking low battery again (will wake instantly on button press) to save power
                                          // We actually do not need to check the battery this often, this is just the longest the watchdog timer can sleep for  
                                          // The CPU only used a few microamps for this 8 seconds, which shoudl help extend battery life. 
             
-        }            
+        } 
+        
                             
     }        
         

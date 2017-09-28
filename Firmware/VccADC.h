@@ -51,8 +51,11 @@ uint16_t readADC(void);
 
 #define VCC2ADC(v) ((uint16_t) ((1.1*1023.0)/v))
 
+// This macro tests if the current Vcc is currently below the specified voltage
+// Note that the `<` is reversed becuase larger values from the ADC corespond to smaller
+// Vcc voltages when measuring the internal bandgap like we do here. 
 
-// This macro tests if the current Vcc is currently above the specified voltage
 
-#define VCC_GT(v) (readADC()<=VCC2ADC(v))      // returns true if the ADC is higher than V
+// Note that this is a macro so the floating point math in VCC2ADC can be evaluated statically
+// when V is const, which it should be. 
 
