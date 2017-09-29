@@ -992,9 +992,9 @@ static void badEEPROMBlink(void) {
 // Show the user something went wrong and we are shutting down.
 // Blink the LED _count_ times every second.
 // Continue doing this for at least DIAGNOSTIC_BLINK_SECONDS
-// then deep sleep until the button is pressed.
-// ONce button is pressed, we light the LED to try and use up decouple caps
-// so when the switch is turned on, we will restart
+// then go into a mode where we burn about 50uA forever.
+// We need to do this to discharge the decoupling caps
+// se the FM_IC will reset when we do a battery change. 
 
 // It would be nice if pushing the button would just wake up back up, 
 // but the FM_IC seems to need a full power cycle for that to work. 
@@ -1013,7 +1013,8 @@ static void lowBatteryShutdown(void) {
     
     while (1) { 
         
-    
+                
+         
         // TODO: Test how much current actually used here. Can we lower it with peripheral power control register?
         // TODO: Add a MOSFET so we can completely shut them off (they still pull about 25uA in reset)?
     
@@ -1023,7 +1024,7 @@ static void lowBatteryShutdown(void) {
     
         uint8_t blinkCountDown= DIAGNOSTIC_BLINK_TIMEOUT_S;
     
-        while (blinkCountDown-- && !buttonDown() ) {          // Still blinking? Also, a button press will abort the blink cycle
+        while ( blinkCountDown-- &&  !buttonDown() ) {          // Still blinking? Also, a button press will abort the blink cycle
         
             // Note that here we directly turn the LED on and off using the pin rather than using
             // PWM. This is so we can get maximum brightness when the battery voltage is low.
@@ -1032,14 +1033,24 @@ static void lowBatteryShutdown(void) {
             SBI( PORTB , LED_DRIVE_BIT );
             sleepFor( HOWLONG_16MS);
             CBI( PORTB , LED_DRIVE_BIT );
-            sleepFor( HOWLONG_250MS );                // Space between blinks
+            
+            _delay_ms(250);                             // Space between blinks. Waste power. 
+            //sleepFor( HOWLONG_250MS );                // Space between blinks
             SBI( PORTB , LED_DRIVE_BIT );
             sleepFor( HOWLONG_16MS);
             CBI( PORTB , LED_DRIVE_BIT );
-            sleepFor( HOWLONG_2S );                // Space between blinks
+            sleepFor( HOWLONG_1S );                // Space between blinks
         
         }
-    
+        
+        
+        while (1) {
+            _delay_ms(10); // Burn power. Ouch this hurts. 
+            sleepFor( HOWLONG_125MS );
+        }
+        
+
+        /*    
         sei();          // Enable interrupts. This will wake us if the user presses the button to signal they replaced the battery.    
         deepSleep();
         cli(); 
@@ -1073,8 +1084,10 @@ static void lowBatteryShutdown(void) {
         
         // If by now we are still runiing, 
         
+        */
     
     }    
+    
     
     /*
 
