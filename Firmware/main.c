@@ -163,7 +163,8 @@
 #define LOW_BATTERY_VOLTAGE_WARM_COUNT  10      // We need to see this many consecutive low battery voltage readings before shutting down
                                                 // this prevents us from shutting down based on seeing one sample that might have happened 
                                                 // right when the amp was pulling a spike of current. 
-
+                                                
+                                                
 // TODO: Empirically figure out optimal values for low battery voltages
 
 #define BREATH_COUNT (5)       // How many initial breaths should we display? Resets on startup and after each button press. Each breath currently about 2 secs.
@@ -357,6 +358,7 @@ static void setLEDBrightness( uint8_t newBrightness ) {
                 
 }    
 
+
 // Breath data thanks to Lady Ada
 
 // MUST end with 0 brightness or else LED will stay on during sleep and kill battery.
@@ -415,7 +417,7 @@ static inline void set_shadow_reg_non_macro(si4702_register reg, uint16_t value)
 
 // Read registers 0x0a and 0x0b from FM_IC.
 // We really only care about 0x0b because this is where the current channel is saved after a seek.
-// We have to read both becuase all TWO reads on this chip start at register 0x0a (they wraps around to at 0x0f) 
+// We have to read both because all TWO reads on this chip start at register 0x0a (they wraps around to at 0x0f) 
 // We need 0x03 so we can check what station we landed on after a seek.
 
 static void si4702_read_registers_upto_0B(void)
@@ -440,39 +442,6 @@ static void si4702_write_registers(unsigned upto_reg)
     USI_TWI_Write_Data( FMIC_ADDRESS ,  &(shadow[REGISTER_02]) , ( upto_reg - REGISTER_02 + 2) );
 }
 
-// Blink a byte out pin 2 (normally button)
-
-void __attribute__ ((unused)) debugBlinkByte( uint8_t data ) {
-
-    CBI( PORTB , PB3 );    // TODO: TESTING
-    SBI( DDRB , PB3 );// TODO: TESTING
-    
-    _delay_us(500);
-
-    for( uint8_t bitMask=0b10000000; bitMask !=0; bitMask>>=1 ) {
-
-        SBI( PORTB , PB3 );    // TODO: TESTING
-        _delay_us(50);
-        CBI( PORTB , PB3 );     // TODO: TESTING
-        _delay_us(50);
-        
-        // setup data bit
-                        
-        if ( data & bitMask) {
-            SBI( PORTB , PB3 );    // TODO: TESTING
-        } else {
-            CBI( PORTB , PB3 );     // TODO: TESTING
-            
-        }     
-        
-        _delay_us(900);           
-        
-   }
-    CBI( DDRB , PB3 );// TODO: TESTING
-    SBI( PORTB , PB3 );// TODO: TESTING
-    
-}   
-
 
 
 /*
@@ -482,8 +451,6 @@ void __attribute__ ((unused)) debugBlinkByte( uint8_t data ) {
 #define	SEEK_RSSI_THRESHOLD	(10)
 #define	SEEK_SNR_THRESHOLD	(2)
 #define SEEK_IMPULSE_THRESHOLD	(4)
-
-
 
 
 
@@ -664,54 +631,6 @@ static void sleepFor( uint8_t howlong ) {
     WDTCR = 0;                      // Turn off the WDT interrupt (no special sequence needed here)
                                     // (assigning all bits to zero is 1 instruction and we don't care about the other bits getting clobbered
     
-}    
-
-
-// Show the user something went wrong and we are shutting down.
-// Blink the LED _count_ times every second.
-// Continue doing this for at least DIAGNOSTIC_BLINK_SECONDS
-// then deep sleep forever.
-// Assumes interrupts off.
-// Assumes amp and FMIC in low power RESET
-//
-// Adjusts LED brightness based on Vcc voltage
-// Assumes Timer is running to PWM the LED
-//
-// Call with blinkcount at least 1 or else LED possibly could stay on when asleep and waste power
-
-static void shutDown(uint8_t blinkCount) {
-        
-        // Disable FMIC and AMP
-        CBI( PORTB , FMIC_RESET_BIT);    // drive reset low, makes them sleep. DDR is set output on start-up and never changed. 
-        
-        
-        // Show blink pattern for a while...
-                   
-        for (uint8_t countdown=DIAGNOSTIC_BLINK_TIMEOUT_S; countdown>0; countdown--) {
-            
-            for(uint8_t p=blinkCount; p>0; p-- ) {   
-                setLEDBrightness(255);
-                _delay_ms(20);
-                setLEDBrightness(0);                
-                sleepFor( HOWLONG_500MS );                
-            }
-            
-            sleepFor( HOWLONG_1S );          // 1 second pause between blink patterns
-                    
-        }    
-        
-        // Timer is off when we get here because the last LED setbrightness was 0
-        
-        adc_off();
-        
-        // TODO: Do this in PMIC? 
-                        
-        // TODO: Test how much current actually used here. Can we lower it with peripheral power control register?
-        // TODO: Add a MOSFET so we can completely shut them off (they still pull about 25uA in reset)?
-        
-        // Interrupts are off, so this will be a sleep we never wake from...
-        
-        deepSleep();
 }    
 
 
@@ -937,7 +856,7 @@ static inline uint8_t buttonDown(void) {
     return( !TBI( PINB , BUTTON_INPUT_BIT ));           // Button is pulled high, short to ground when pressed
 }    
 
-
+ 
 // Called on button press pin change interrupt
 // Do nothing in ISR, just here so we can catch the interrupt and wake form deep sleep
 // ISRs are ugly semantics with volatile access and stuff, simpler to handle in main thread. 
@@ -957,7 +876,7 @@ static uint8_t initButton(void)
  
      SBI( PORTB , BUTTON_INPUT_BIT);              // Enable pull up on button 
      
-     _delay_ms(1);                                // Give the little pull-up a chance to overcome pin capacatance
+     _delay_ms(1);                                // Give the little pull-up a chance to overcome pin capacitance
      
      uint8_t ret = buttonDown();
     
@@ -1038,6 +957,137 @@ static void handleButtonDown(void) {
 }
 
 
+// Show user bad eeprom was read with 3 blinks.
+// Use the PWM on LED since the battery is good. 
+// No way to wake up since the EEPROM will still be bad.
+
+static void badEEPROMBlink(void) {
+
+    // No need to disable FMIC and AMP becuase we didn't turn them on before the eeprom check 
+      
+    // No need to turn off adc since it was not enabled yet
+       
+    uint8_t blinkCountDown= DIAGNOSTIC_BLINK_TIMEOUT_S;
+    
+    while (blinkCountDown-- ) {          // Still blinking? Also, a button press will abort the blink cycle
+
+        for( uint8_t c=3; c ; c--) {                // 3 blinks
+            setLEDBrightness(255); 
+            sleepFor( HOWLONG_16MS);
+            setLEDBrightness(0);
+            sleepFor( HOWLONG_500MS );                // Space between blinks
+        }        
+        
+        sleepFor( HOWLONG_2S );                // Space between blinks
+        
+    }
+
+    // Interrupts are off, so this is forevah    
+    deepSleep();
+    // Never get here
+    
+}    
+
+
+// Show the user something went wrong and we are shutting down.
+// Blink the LED _count_ times every second.
+// Continue doing this for at least DIAGNOSTIC_BLINK_SECONDS
+// then deep sleep until the button is pressed.
+// ONce button is pressed, we light the LED to try and use up decouple caps
+// so when the switch is turned on, we will restart
+
+// It would be nice if pushging the button wouyld just wake up back up, 
+// but the FM_IC seems to need a full power cycle for that to work. 
+
+static void lowBatteryShutdown(void) {
+    
+    setLEDBrightness(0);        // Turn off PWM, we will directly drive the LED from the pin output
+    
+    while (1) { 
+        
+    
+        // TODO: Test how much current actually used here. Can we lower it with peripheral power control register?
+        // TODO: Add a MOSFET so we can completely shut them off (they still pull about 25uA in reset)?
+    
+        // Turn on interrupts. This will enable wake on button press
+        // which gives uses a way to not have to wait for us to completely run down the
+        // decoupling caps
+    
+        uint8_t blinkCountDown= DIAGNOSTIC_BLINK_TIMEOUT_S;
+    
+        while (blinkCountDown-- && !buttonDown() ) {          // Still blinking? Also, a button press will abort the blink cycle
+        
+            // Note that here we directly turn the LED on and off using the pin rather than using
+            // PWM. This is so we can get maximum brightness when the battery voltage is low.
+        
+            // Very quick blink LED twice
+            SBI( PORTB , LED_DRIVE_BIT );
+            sleepFor( HOWLONG_16MS);
+            CBI( PORTB , LED_DRIVE_BIT );
+            sleepFor( HOWLONG_250MS );                // Space between blinks
+            SBI( PORTB , LED_DRIVE_BIT );
+            sleepFor( HOWLONG_16MS);
+            CBI( PORTB , LED_DRIVE_BIT );
+            sleepFor( HOWLONG_2S );                // Space between blinks
+        
+        }
+    
+        sei();          // Enable interrupts. This will wake us if the user presses the button to signal they replaced the battery.    
+        deepSleep();
+        cli(); 
+    
+        // Spin and blink while the button is down. We do this for a couple reasons.
+        // 1. Give user feedback that we see the button.
+        // 2. Make sure the button is up by the time we restart so we don't see it down and do a seek or save
+        // 3. If the battery was not changed, this will really kill a dead battery and drop the voltage.
+    
+        while (buttonDown()) {
+
+            SBI( PORTB , LED_DRIVE_BIT );
+            _delay_ms(20);
+            CBI( PORTB , LED_DRIVE_BIT );
+            _delay_ms(20);
+        
+        }
+        
+        // Now we spend ~255*40ms= 10s blinking craziliy to try and run out the capactors so chip will reset on powerup. 
+        
+        uint8_t delay=255;
+        
+        while (delay--) {
+
+            SBI( PORTB , LED_DRIVE_BIT );
+            _delay_ms(20);
+            CBI( PORTB , LED_DRIVE_BIT );
+            _delay_ms(20);
+            
+        }
+        
+        // If by now we are still runiing, 
+        
+    
+    }    
+    
+    /*
+
+    //Test to see if we get here
+
+    
+    while (1) {
+
+        SBI( PORTB , LED_DRIVE_BIT );
+        _delay_ms(200);
+        CBI( PORTB , LED_DRIVE_BIT );
+        _delay_ms(200);
+        
+    }
+    
+    
+    */
+        
+}
+
+
 static void debugBlinkDigit(uint8_t c) {
     
     while (c--) {
@@ -1070,12 +1120,142 @@ static void __attribute__ ((unused)) debugBlinkVoltage(void) {
     
     _delay_ms(1000);        // Break between readings
                 
+}  
+
+void run(void) {
+    SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
+    // The bit direction was set to output when we first started in main()
+    
+    _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
+                                       // high) does not occur within 300 ns before the rising edge of RST.
+    
+        
+    si4702_init();
+    
+    // We do a check here because init on FM_IC takes 500ms, so by the time we get here
+    // power has stabilized but we do want to check before the amp starts playing music.
+
+    adc_on();
+    
+    if (VCC_LESS_THAN( LOW_BATTERY_VOLTAGE_COLD )) {
+        
+
+        // Disable FMIC and AMP
+        CBI( PORTB , FMIC_RESET_BIT);    // drive reset low, makes them sleep. DDR is set output on start-up and never changed.
+        
+        adc_off();
+        
+        lowBatteryShutdown();
+        
+        return;
+        
+    }        
+        
+            
+    si4702_enable();            // Finish bringing up the FM_IC (it will still be muted)
+    
+    uint16_t chan = eeprom_read_word(EEPROM_CHANNEL);       // Assumes this does not have bit 15 set.
+
+    si4702_tune( chan );        // Tune up the programmed station and start playing
+        
+    // Radio is now on and tuned
+    
+    uint8_t breathCountdown = BREATH_COUNT;         // Count down breaths displayed. When this gets to 0, stop showing breath unitl a button push resets count
+
+    uint8_t fadecycle = BREATH_CYCLE_LEN;           // Where in the breath cycle are we now
+    
+    uint8_t warm_low_count=0;                       // How many times in a row has the warm voltage been too low?
+    
+    while (1) {
+        
+        // This loop cycles every 20ms when we are in breathing LED mode
+        // Thereafter it only cycles once every 8 seconds and the CPU deep sleeps between cycles.
+        
+        // Constantly check battery and shutdown if low
+        
+        //debugBlinkVoltage();
+        
+        if  (VCC_LESS_THAN( LOW_BATTERY_VOLTAGE_WARM )) {
+            
+            warm_low_count++;
+            
+            if (warm_low_count>=LOW_BATTERY_VOLTAGE_WARM_COUNT) {
+                
+                // Only shutdown if we see a consecutive series of low voltage samples to avoid
+                // false alarm due to temp low voltage from a current spike.
+                
+                // Disable FMIC and AMP
+                CBI( PORTB , FMIC_RESET_BIT);    // drive reset low, makes them sleep. DDR is set output on start-up and never changed.
+                                               
+                adc_off();
+                
+                setLEDBrightness(0);        // Turn off LED PWM
+                
+                lowBatteryShutdown();
+                
+                return;
+                
+            }                
+                
+            
+        } else {
+            
+            // If we see even one good voltage sample, then we start counting over again
+            // this helps make sure the battery is really low before we shut down
+            
+            warm_low_count=0;
+            
+        }
+                
+        
+        if (buttonDown()) {
+            
+            handleButtonDown();
+            
+            // Every time the button is pressed we start the breath cycle over
+            
+            breathCountdown = BREATH_COUNT;
+
+            fadecycle =BREATH_CYCLE_LEN;
+            
+        }
+        
+        
+        // Breathe for a while so user knows we are alive in case not tuned to a good station or volume too low
+        // Each pass though the while loop in this stage takes about 20ms
+
+        
+        if (breathCountdown) {
+            
+            fadecycle--;
+            
+            setLEDBrightness( breath(fadecycle)  );
+            
+            _delay_ms(20);  // Empirical delay here lets this brightrness actuall go though a PWM cycle and be visible on the LED
+            // Can't sleep here because that would halt the timer that is PWMing the LED
+            
+            if (!fadecycle) {
+                
+                fadecycle=BREATH_CYCLE_LEN;
+                
+                breathCountdown--;
+                
+            }
+            
+        } else {        // We are past the initial breathing period
+            
+            sleepFor( HOWLONG_1S );      // Do nothing for a while before checking low battery again (will wake instantly on button press) to save power
+            // We actually do not need to check the battery this often, this is just the longest the watchdog timer can sleep for
+            // The CPU only used a few microamps for this 8 seconds, which shoudl help extend battery life.
+            
+        }
+                
+    }
 }    
 
 
 int main(void) {
-
-    
+           
     // Set up the reset line to the FM_IC and AMP first so they are quiet. 
     // This eliminates the need for the external pull-down on this line. 
         
@@ -1085,15 +1265,11 @@ int main(void) {
                                    // Keeps input pin from floating and toggling unnecessarily and wasting power
                                        
     _delay_ms(50);                 // Debounce the on switch
-    
-    
+        
     // TODO: Test shutdown current on a new PCB that lets us hold the amp in reset
                                    
     LED_PWM_init();                // Set up the PWM so we can use the LED. Note that the timer does not actually get started until we set the brightness.                                   
-  
-
-
-                                                                                       
+                                                                                         
     if (initButton()) {             // Was button down on startup?
                 
         // TODO: How should this work?
@@ -1125,127 +1301,15 @@ int main(void) {
         // This is nice because at least we get some feedback that EEPROMS are corrupting.
         // Do not try to rewrite EEPROM settings, let the user do that manually with a factory reset.
         
-        shutDown( DIAGNOSTIC_BLINK_BADEEPROM );
-        
+        badEEPROMBlink();
+                
     }        
     
+    while (1) {        
         
-    SBI( PORTB , FMIC_RESET_BIT );     // Bring FMIC and AMP out of reset
-                                       // The bit direction was set to output when we first started in main()
-    
-    _delay_ms(1);                      // When selecting 2-wire Mode, the user must ensure that a 2-wire start condition (falling edge of SDIO while SCLK is
-                                       // high) does not occur within 300 ns before the rising edge of RST.
-    
-    
-    
-	si4702_init();
-    
-    // We do a check here because init on FM_IC takes 500ms, so by the time we get here
-    // power has stabilized but we do want to check before the amp starts playing music. 
-
-    adc_on();
-
-        
-    if (VCC_LESS_THAN( LOW_BATTERY_VOLTAGE_COLD )) {
-        
-        shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
-        
-    }
-    
-        
-    si4702_enable();            // Finish bringing up the FM_IC (it will still be muted)
-    
-    uint16_t chan = eeprom_read_word(EEPROM_CHANNEL);       // Assumes this does not have bit 15 set.
-
-    si4702_tune( chan );        // Tune up the programmed station and start playing
-    
-        
-    
-    // Radio is now on and tuned
-        
-    uint8_t breathCountdown = BREATH_COUNT;         // Count down breaths displayed. When this gets to 0, stop showing breath unitl a button push resets count
-
-    uint8_t fadecycle = BREATH_CYCLE_LEN;           // Where in the breath cycle are we now
-    
-    uint8_t warm_low_count=0;                       // How many times in a row has the warm voltage been too low?
-           
-    while (1) {
-        
-        // This loop cycles every 20ms when we are in breathing LED mode
-        // Thereafter it only cycles once every 8 seconds and the CPU deep sleeps between cycles. 
-        
-        // Constantly check battery and shutdown if low
-        
-        //debugBlinkVoltage();
-        
-        if  (VCC_LESS_THAN( LOW_BATTERY_VOLTAGE_WARM )) {
-                        
-            warm_low_count++;
-            
-            if (warm_low_count>=LOW_BATTERY_VOLTAGE_WARM_COUNT) {
-                
-                // Only shutdown if we see a consecutive series of low voltage samples to avoid
-                // false alarm due to temp low voltage from a current spike. 
-                shutDown( DIAGNOSTIC_BLINK_LOWBATTERY );
-                
-            }                
-        
-        } else {
-            
-            // If we see even one good voltage sample, then we start counting over again
-            // this helps make sure the battery is really low before we shut down
-            
-            warm_low_count=0;
-            
-        }                         
-        
-        
-        
-        if (buttonDown()) {
-            
-            handleButtonDown();
-            
-            // Every time the button is pressed we start the breath cycle over
-            
-            breathCountdown = BREATH_COUNT;
-
-            fadecycle =BREATH_CYCLE_LEN;     
-            
-        }            
-        
-    
-        // Breathe for a while so user knows we are alive in case not tuned to a good station or volume too low    
-        // Each pass though the while loop in this stage takes about 20ms
-
-    
-        if (breathCountdown) {  
-                                   
-            fadecycle--;
-                       
-            setLEDBrightness( breath(fadecycle)  );
-              
-             _delay_ms(20);  // Emperical delay here lets this brightrness actuall go though a PWM cycle and be visible on the LED
-                             // Can't sleep here because that would halt the timer that is PWMing the LED
-                                         
-            if (!fadecycle) {
-                
-                fadecycle=BREATH_CYCLE_LEN;
-                
-                breathCountdown--;
-                
-            }                    
-         
-        } else {        // We are past the initial breathing period
-            
-            sleepFor( HOWLONG_8S );      // Do nothing for a while before checking low battery again (will wake instantly on button press) to save power
-                                         // We actually do not need to check the battery this often, this is just the longest the watchdog timer can sleep for  
-                                         // The CPU only used a few microamps for this 8 seconds, which shoudl help extend battery life. 
-            
-        } 
-        
-                            
+        // In here, we try to run but if battery is low then we turn off radio and sleep until a button press and then return.
+        run();        
     }        
-        
     // Never get here...
        
 }
