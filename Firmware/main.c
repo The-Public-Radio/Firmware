@@ -996,12 +996,20 @@ static void badEEPROMBlink(void) {
 // ONce button is pressed, we light the LED to try and use up decouple caps
 // so when the switch is turned on, we will restart
 
-// It would be nice if pushging the button wouyld just wake up back up, 
+// It would be nice if pushing the button would just wake up back up, 
 // but the FM_IC seems to need a full power cycle for that to work. 
 
 static void lowBatteryShutdown(void) {
     
     setLEDBrightness(0);        // Turn off PWM, we will directly drive the LED from the pin output
+    
+    
+    // Shutdown all peripherals so save power in deep sleep
+    // Before 4uA
+    // After 4uA
+    // Most of this draw is likely from the amp and FM_IC in shutdown modes
+    PRR = _BV( PRTIM1 ) | _BV( PRTIM0) | _BV( PRUSI ) | _BV(PRADC ); 
+    
     
     while (1) { 
         
