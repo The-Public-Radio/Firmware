@@ -85,8 +85,7 @@ uint16_t readADC(void) {
     ADCSRA |= _BV(ADSC);                // Start a conversion
 
 
-    while( ADCSRA & _BV( ADSC) ) ;      // Wait for 1st conversion to be ready...
-                                        //..and ignore the result                        
+    while( ADCSRA & _BV( ADSC) ) ;      // Wait for conversion to be ready...
         
     /*
         After the conversion is complete (ADIF is high), the conversion result can be found in the ADC

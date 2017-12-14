@@ -1,9 +1,10 @@
 #
 # Select correct AVR part. Production units use ATTiny45.
 #
-PART=attiny45
+PART=attiny25
 
-OBJS=main.o USI_TWI_Master.o VccADC.o VccProg.o
+OBJS=main.o USI_TWI_Master.o VccADC.o 
+# VccProg.o
 
 OPTFLAGS=-Os
 
@@ -60,5 +61,5 @@ clobber: clean
 
 USI_TWI_Master.o: USI_TWI_Master.c USI_TWI_Master.h
 VccADC.o: VccADC.c VccADC.h
-VccProg.o: VccProg.c VccProg.h
+# VccProg.o: VccProg.c VccProg.h
 
